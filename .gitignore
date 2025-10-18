@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Env
+venv/
+.env
+
+# IDEs
+.vscode/
+.idea/
+
+# Migrations cache
+alembic/versions/*.pyc
