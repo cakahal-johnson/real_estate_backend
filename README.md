@@ -52,3 +52,23 @@ pip list
 # From here, you’ll run the server with:
 uvicorn app.main:app --reload
 ---
+````
+real_estate_backend/
+│
+├── app/
+│   ├── __init__.py         ✅ must exist
+│   ├── main.py
+│   ├── database.py
+│   ├── models.py
+│   ├── schemas.py
+│   ├── core/
+│   │   ├── __init__.py     ✅ must exist
+│   │   └── config.py
+│   └── routers/
+│       ├── __init__.py     ✅ must exist
+│       └── listings.py
+│
+├── venv/
+└── requirements.txt
+
+````

@@ -1,16 +1,29 @@
-# This is a sample Python script.
+# app/main.py
+from fastapi import FastAPI
+from app.database import Base, engine
+from app.routers import listings
+from fastapi.middleware.cors import CORSMiddleware
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+# Create all tables
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(title="RealEstateHub API")
+
+# Allow frontend & mobile access (update origins later)
+origins = ["*"]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Include Routers
+app.include_router(listings.router)
 
 
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
-
-
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
-
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+@app.get("/")
+def root():
+    return {"message": "Welcome to RealEstateHub API"}
