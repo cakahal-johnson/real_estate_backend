@@ -1,7 +1,7 @@
 # app/routers/listings.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from app import models, schemas
 from app.database import get_db
 from app.core.security import get_current_active_user, require_agent
@@ -10,9 +10,41 @@ router = APIRouter(prefix="/listings", tags=["Listings"])
 
 
 @router.get("/", response_model=List[schemas.ListingResponse])
-def get_listings(db: Session = Depends(get_db)):
-    listings = db.query(models.Listing).all()
+def get_listings(
+    db: Session = Depends(get_db),
+    search: Optional[str] = Query(None, description="Search by title or description"),
+    location: Optional[str] = Query(None, description="Filter by location"),
+    min_price: Optional[float] = Query(None, description="Minimum price"),
+    max_price: Optional[float] = Query(None, description="Maximum price"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(10, ge=1, le=100, description="Max number of listings to return"),
+):
+    """
+    Get listings with optional search, filtering, and pagination.
+    """
+    query = db.query(models.Listing)
+
+    # --- Filtering and Search ---
+    if search:
+        search_term = f"%{search.lower()}%"
+        query = query.filter(
+            (models.Listing.title.ilike(search_term)) |
+            (models.Listing.description.ilike(search_term))
+        )
+
+    if location:
+        query = query.filter(models.Listing.location.ilike(f"%{location.lower()}%"))
+
+    if min_price is not None:
+        query = query.filter(models.Listing.price >= min_price)
+
+    if max_price is not None:
+        query = query.filter(models.Listing.price <= max_price)
+
+    # --- Pagination ---
+    listings = query.order_by(models.Listing.created_at.desc()).offset(skip).limit(limit).all()
     return listings
+
 
 
 @router.get("/{listing_id}", response_model=schemas.ListingResponse)
