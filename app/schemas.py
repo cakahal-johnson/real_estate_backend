@@ -72,3 +72,23 @@ class PaginatedListingsResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
+# favorites responses
+class FavoriteBase(BaseModel):
+    listing_id: int
+
+
+class FavoriteResponse(FavoriteBase):
+    id: int
+    user_id: int
+    created_at: datetime
+    listing: Optional["ListingResponse"]
+
+    class Config:
+        from_attributes = True
+
+
+# For nested relationships
+from app.schemas import ListingResponse  # forward ref fix
+FavoriteResponse.update_forward_refs()
+
