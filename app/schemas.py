@@ -1,6 +1,6 @@
 # app/schemas.py
 from pydantic import BaseModel, EmailStr
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -62,3 +62,13 @@ class TokenData(BaseModel):
     user_id: Optional[int] = None
     email: Optional[str] = None
     role: Optional[str] = None
+
+
+# paginated responses
+class PaginatedListingsResponse(BaseModel):
+    total: int
+    items: List[ListingResponse]
+
+    class Config:
+        from_attributes = True
+

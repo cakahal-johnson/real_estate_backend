@@ -9,7 +9,7 @@ from app.core.security import get_current_active_user, require_agent
 router = APIRouter(prefix="/listings", tags=["Listings"])
 
 
-@router.get("/", response_model=List[schemas.ListingResponse])
+@router.get("/", response_model=schemas.PaginatedListingsResponse)
 def get_listings(
     db: Session = Depends(get_db),
     search: Optional[str] = Query(None, description="Search by title or description"),
@@ -18,9 +18,12 @@ def get_listings(
     max_price: Optional[float] = Query(None, description="Maximum price"),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(10, ge=1, le=100, description="Max number of listings to return"),
+    sort_by: str = Query("created_at", description="Sort by: price or created_at"),
+    sort_order: str = Query("desc", description="Sort order: asc or desc"),
 ):
     """
-    Get listings with optional search, filtering, and pagination.
+    Get listings with optional filters, search, sorting, and pagination.
+    Returns { total, items } for frontend pagination support.
     """
     query = db.query(models.Listing)
 
@@ -41,10 +44,28 @@ def get_listings(
     if max_price is not None:
         query = query.filter(models.Listing.price <= max_price)
 
-    # --- Pagination ---
-    listings = query.order_by(models.Listing.created_at.desc()).offset(skip).limit(limit).all()
-    return listings
+    # --- Total count (before pagination) ---
+    total = query.count()
 
+    # --- Sorting ---
+    sort_column = models.Listing.created_at
+    if sort_by == "price":
+        sort_column = models.Listing.price
+    elif sort_by == "title":
+        sort_column = models.Listing.title
+
+    if sort_order.lower() == "asc":
+        query = query.order_by(sort_column.asc())
+    else:
+        query = query.order_by(sort_column.desc())
+
+    # --- Pagination ---
+    listings = query.offset(skip).limit(limit).all()
+
+    return {
+        "total": total,
+        "items": listings
+    }
 
 
 @router.get("/{listing_id}", response_model=schemas.ListingResponse)
