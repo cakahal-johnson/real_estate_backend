@@ -1,4 +1,3 @@
-# app/routers/favorites.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
@@ -58,6 +57,35 @@ def check_if_favorited(
         is not None
     )
     return {"is_favorited": exists}
+
+
+@router.post("/toggle/{listing_id}")
+def toggle_favorite(
+    listing_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
+):
+    """
+    ✅ Toggle favorite state for a given listing.
+    - If already favorited → remove it.
+    - If not → add it.
+    Returns: {"is_favorited": true/false}
+    """
+    listing = db.query(models.Listing).filter(models.Listing.id == listing_id).first()
+    if not listing:
+        raise HTTPException(status_code=404, detail="Listing not found")
+
+    existing = db.query(models.Favorite).filter_by(user_id=current_user.id, listing_id=listing_id).first()
+
+    if existing:
+        db.delete(existing)
+        db.commit()
+        return {"is_favorited": False}
+
+    fav = models.Favorite(user_id=current_user.id, listing_id=listing_id)
+    db.add(fav)
+    db.commit()
+    return {"is_favorited": True}
 
 
 @router.delete("/{listing_id}", status_code=status.HTTP_204_NO_CONTENT)
