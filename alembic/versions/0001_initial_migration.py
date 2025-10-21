@@ -1,3 +1,4 @@
+# alembic/versions/0001_initial_migrations.py
 """Initial migration — create users, listings, favorites tables"""
 
 from alembic import op
