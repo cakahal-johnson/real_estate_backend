@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app import models
 from app.core.security import require_admin
+from sqlalchemy import func
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -70,3 +71,16 @@ def update_order_status(order_id: int, status_update: dict, db: Session = Depend
 @router.get("/chats")
 def list_chats(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
     return db.query(models.ChatMessage).all()
+
+
+@router.get("/revenue-summary")
+def revenue_summary(db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    total_orders = db.query(func.count(models.Order.id)).scalar()
+    total_revenue = db.query(func.sum(models.Order.amount)).scalar()
+    completed = db.query(func.count(models.Order.id)).filter(models.Order.status == "completed").scalar()
+
+    return {
+        "total_orders": total_orders or 0,
+        "completed_orders": completed or 0,
+        "total_revenue": total_revenue or 0.0,
+    }
