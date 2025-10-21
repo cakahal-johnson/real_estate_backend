@@ -5,6 +5,8 @@ from app.routers import listings, users, auth, favorites
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.cors import setup_cors
 from app.core.errors import add_exception_handlers
+from app.routers import admin
+from app.routers import orders
 
 
 # Create all tables
@@ -21,6 +23,8 @@ app.include_router(auth.router)
 app.include_router(users.router)
 app.include_router(listings.router)
 app.include_router(favorites.router)
+app.include_router(admin.router)
+app.include_router(orders.router)
 
 
 @app.get("/")
