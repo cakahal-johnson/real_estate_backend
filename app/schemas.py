@@ -99,3 +99,28 @@ class UserUpdate(BaseModel):
     password: Optional[str] = None
 
 
+# --- Order schemas ---
+class OrderBase(BaseModel):
+    listing_id: int
+
+
+class OrderCreate(OrderBase):
+    pass
+
+
+class OrderUpdate(BaseModel):
+    status: str
+
+
+class OrderResponse(BaseModel):
+    id: int
+    buyer_id: int
+    listing_id: int
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+
