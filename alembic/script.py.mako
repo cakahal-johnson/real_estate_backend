@@ -1,3 +1,4 @@
+# alembic/script.py.mako
 """Add owner_id to listings"""
 
 from alembic import op
