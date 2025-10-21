@@ -4,6 +4,7 @@ from typing import List
 from app import models, schemas
 from app.database import get_db
 from app.core.security import get_current_active_user
+from sqlalchemy import func
 
 router = APIRouter(prefix="/favorites", tags=["Favorites"])
 
@@ -38,6 +39,21 @@ def get_my_favorites(
     """Return all listings favorited by the current user"""
     favorites = db.query(models.Favorite).filter(models.Favorite.user_id == current_user.id).all()
     return favorites
+
+
+@router.get("/dashboard")
+def favorites_dashboard(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_active_user)
+):
+    result = (
+        db.query(models.Listing.category, func.count(models.Favorite.id))
+        .join(models.Favorite, models.Favorite.listing_id == models.Listing.id)
+        .filter(models.Favorite.user_id == current_user.id)
+        .group_by(models.Listing.category)
+        .all()
+    )
+    return [{"category": cat, "count": cnt} for cat, cnt in result]
 
 
 @router.get("/check/{listing_id}")
