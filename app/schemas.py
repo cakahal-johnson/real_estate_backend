@@ -92,3 +92,10 @@ class FavoriteResponse(FavoriteBase):
 from app.schemas import ListingResponse  # forward ref fix
 FavoriteResponse.update_forward_refs()
 
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+
+

@@ -4,6 +4,7 @@ from app.database import Base, engine
 from app.routers import listings, users, auth, favorites
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.cors import setup_cors
+from app.core.errors import add_exception_handlers
 
 
 # Create all tables
@@ -13,16 +14,7 @@ app = FastAPI(title="RealEstateHub API")
 
 
 setup_cors(app)
-
-# origins = ["*"]
-
-# app.add_middleware(
-#     CORSMiddleware,
-#     allow_origins=origins,
-#     allow_credentials=True,
-#     allow_methods=["*"],
-#     allow_headers=["*"],
-# )
+add_exception_handlers(app)
 
 # Include Routers
 app.include_router(auth.router)
