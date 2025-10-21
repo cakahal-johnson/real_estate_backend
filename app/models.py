@@ -18,6 +18,8 @@ class User(Base):
     listings = relationship("Listing", back_populates="owner")
     # ✅ Define relationship to Favorites
     favorites = relationship("Favorite", back_populates="user", cascade="all, delete")
+    # Orders
+    orders = relationship("Order", back_populates="buyer", cascade="all, delete")
 
 
 class Listing(Base):
@@ -35,7 +37,10 @@ class Listing(Base):
 
     # ✅ Relationship back to user
     owner = relationship("User", back_populates="listings")
+    # add to favorite
     favorited_by = relationship("Favorite", back_populates="listing", cascade="all, delete")
+    # Orders
+    orders = relationship("Order", back_populates="listing", cascade="all, delete")
 
 
 class Favorite(Base):
@@ -51,3 +56,30 @@ class Favorite(Base):
 
     # ✅ Prevent duplicates
     __table_args__ = (UniqueConstraint('user_id', 'listing_id', name='unique_user_listing_favorite'),)
+
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    buyer_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    listing_id = Column(Integer, ForeignKey("listings.id", ondelete="CASCADE"))
+    status = Column(String(50), default="pending")  # pending / approved / rejected / completed
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    buyer = relationship("User", back_populates="orders")
+    listing = relationship("Listing", back_populates="orders")
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    receiver_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    listing_id = Column(Integer, ForeignKey("listings.id", ondelete="CASCADE"), nullable=True)
+    message = Column(String, nullable=False)
+    timestamp = Column(DateTime(timezone=True), server_default=func.now())
+
+    sender = relationship("User", foreign_keys=[sender_id])
+    receiver = relationship("User", foreign_keys=[receiver_id])
