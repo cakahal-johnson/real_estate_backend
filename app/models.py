@@ -1,5 +1,5 @@
 # app/models.py
-from sqlalchemy import Column, Integer, String, Float, DateTime, func, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, func, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -64,7 +64,12 @@ class Order(Base):
     id = Column(Integer, primary_key=True, index=True)
     buyer_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     listing_id = Column(Integer, ForeignKey("listings.id", ondelete="CASCADE"))
-    status = Column(String(50), default="pending")  # pending / approved / rejected / completed
+    status = Column(String(50), default="pending")  # pending / approved / paid / completed / cancelled
+    payment_status = Column(String(30), default="unpaid")  # unpaid / paid / failed
+    payment_method = Column(String(50), nullable=True)  # e.g. card, transfer, wallet
+    payment_reference = Column(String(100), nullable=True)
+    amount = Column(Float, nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     buyer = relationship("User", back_populates="orders")
@@ -75,11 +80,15 @@ class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
     id = Column(Integer, primary_key=True, index=True)
-    sender_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    receiver_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    listing_id = Column(Integer, ForeignKey("listings.id", ondelete="CASCADE"), nullable=True)
-    message = Column(String, nullable=False)
+    room_id = Column(String, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"))
+    receiver_id = Column(Integer, nullable=True)
+    listing_id = Column(Integer, ForeignKey("listings.id"), nullable=True)
+    message = Column(Text, nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
+    is_read = Column(Integer, default=0)  # 0 = unread, 1 = read ✅
 
     sender = relationship("User", foreign_keys=[sender_id])
-    receiver = relationship("User", foreign_keys=[receiver_id])
+    listing = relationship("Listing", foreign_keys=[listing_id])
+
+

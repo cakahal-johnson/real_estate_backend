@@ -14,18 +14,18 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # ✅ Skip rate limit for auth, profile, favorites & preflight requests
+        # ✅ Paths we should NEVER rate-limit to avoid auth redirect loops
         skip_paths = [
-            "/",
-            "/favicon.ico",
+            "/", "/favicon.ico"
         ]
         skip_startswith = [
-            "/auth",
-            "/users/me",  # token validation
-            "/favorites", # fav fetch
+            "/auth",       # login/register/refresh
+            "/users/me",   # validate token
+            "/favorites",  # auto fetch favorites
             "/static",
         ]
 
+        # ✅ Allow OPTIONS (CORS preflight) always
         if request.method == "OPTIONS" or path in skip_paths or any(path.startswith(p) for p in skip_startswith):
             return await call_next(request)
 
@@ -34,12 +34,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         window_start = now - self.window
 
         self.requests.setdefault(client_ip, [])
-        self.requests[client_ip] = [t for t in self.requests[client_ip] if t > window_start]
+        self.requests[client_ip] = [
+            t for t in self.requests[client_ip] if t > window_start
+        ]
 
         if len(self.requests[client_ip]) >= self.limit:
-            raise HTTPException(status_code=429, detail="Too many requests — slow down")
+            raise HTTPException(
+                status_code=429,
+                detail="Too many requests — slow down"
+            )
 
         self.requests[client_ip].append(now)
         return await call_next(request)
-
-

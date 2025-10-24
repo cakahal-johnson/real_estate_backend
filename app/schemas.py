@@ -55,6 +55,7 @@ class UserResponse(BaseModel):
 # --- Auth / Token schemas ---
 class Token(BaseModel):
     access_token: str
+    refresh_token: str  # ✅ Required
     token_type: str = "bearer"
 
 
@@ -123,4 +124,50 @@ class OrderResponse(BaseModel):
         from_attributes = True
 
 
+class PaymentRequest(BaseModel):
+    order_id: int
+    payment_method: str
+    amount: float
 
+
+class PaymentResponse(BaseModel):
+    order_id: int
+    payment_status: str
+    payment_reference: Optional[str]
+    amount: float
+    timestamp: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class OrderResponse(BaseModel):
+    id: int
+    buyer_id: int
+    listing_id: int
+    status: str
+    payment_status: Optional[str] = None
+    payment_method: Optional[str] = None
+    payment_reference: Optional[str] = None
+    amount: Optional[float] = None
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class ChatMessageBase(BaseModel):
+    message: str
+    listing_id: Optional[int] = None
+    sender_id: int
+    receiver_id: int
+    timestamp: datetime
+    is_read: Optional[int] = 0  # 0 = unread, 1 = read ✅
+
+    class Config:
+        from_attributes = True
+
+
+class FavoriteCheckResponse(BaseModel):
+    is_favorited: bool

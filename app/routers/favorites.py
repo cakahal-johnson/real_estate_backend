@@ -1,12 +1,13 @@
+# app/routers/favorites.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Dict, Union
 from app import models, schemas
 from app.database import get_db
 from app.core.security import get_current_active_user
 from sqlalchemy import func
 
-router = APIRouter(prefix="/favorites", tags=["Favorites"])
+router = APIRouter(prefix="/favorites", tags=["Favorites"], include_in_schema=True)
 
 
 @router.post("/{listing_id}", response_model=schemas.FavoriteResponse, status_code=status.HTTP_201_CREATED)
@@ -15,12 +16,15 @@ def add_favorite(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    """Add a listing to user's favorites"""
     listing = db.query(models.Listing).filter(models.Listing.id == listing_id).first()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    existing = db.query(models.Favorite).filter_by(user_id=current_user.id, listing_id=listing_id).first()
+    existing = db.query(models.Favorite).filter(
+        models.Favorite.user_id == current_user.id,
+        models.Favorite.listing_id == listing_id
+    ).first()
+
     if existing:
         raise HTTPException(status_code=400, detail="Already favorited")
 
@@ -36,12 +40,12 @@ def get_my_favorites(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    """Return all listings favorited by the current user"""
-    favorites = db.query(models.Favorite).filter(models.Favorite.user_id == current_user.id).all()
-    return favorites
+    return db.query(models.Favorite).filter(
+        models.Favorite.user_id == current_user.id
+    ).all()
 
 
-@router.get("/dashboard")
+@router.get("/dashboard", response_model=List[Dict[str, Union[str, int]]])
 def favorites_dashboard(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
@@ -53,45 +57,38 @@ def favorites_dashboard(
         .group_by(models.Listing.category)
         .all()
     )
-    return [{"category": cat, "count": cnt} for cat, cnt in result]
+
+    return [{"category": category, "count": count} for category, count in result]
 
 
-@router.get("/check/{listing_id}")
+@router.get("/check/{listing_id}", response_model=schemas.FavoriteCheckResponse)
 def check_if_favorited(
     listing_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    """
-    ✅ Check if the given listing is already favorited by the current user.
-    Returns: {"is_favorited": true/false}
-    """
-    exists = (
-        db.query(models.Favorite)
-        .filter_by(user_id=current_user.id, listing_id=listing_id)
-        .first()
-        is not None
-    )
-    return {"is_favorited": exists}
+    exists = db.query(models.Favorite).filter(
+        models.Favorite.user_id == current_user.id,
+        models.Favorite.listing_id == listing_id
+    ).first()
+
+    return {"is_favorited": bool(exists)}
 
 
-@router.post("/toggle/{listing_id}")
+@router.post("/toggle/{listing_id}", response_model=schemas.FavoriteCheckResponse)
 def toggle_favorite(
     listing_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    """
-    ✅ Toggle favorite state for a given listing.
-    - If already favorited → remove it.
-    - If not → add it.
-    Returns: {"is_favorited": true/false}
-    """
     listing = db.query(models.Listing).filter(models.Listing.id == listing_id).first()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
 
-    existing = db.query(models.Favorite).filter_by(user_id=current_user.id, listing_id=listing_id).first()
+    existing = db.query(models.Favorite).filter(
+        models.Favorite.user_id == current_user.id,
+        models.Favorite.listing_id == listing_id
+    ).first()
 
     if existing:
         db.delete(existing)
@@ -110,11 +107,13 @@ def remove_favorite(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    """Remove a favorite listing"""
-    fav = db.query(models.Favorite).filter_by(user_id=current_user.id, listing_id=listing_id).first()
+    fav = db.query(models.Favorite).filter(
+        models.Favorite.user_id == current_user.id,
+        models.Favorite.listing_id == listing_id
+    ).first()
+
     if not fav:
         raise HTTPException(status_code=404, detail="Favorite not found")
 
     db.delete(fav)
     db.commit()
-    return None

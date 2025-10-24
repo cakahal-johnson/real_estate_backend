@@ -77,3 +77,9 @@ def require_admin(current_user: models.User = Depends(get_current_active_user)):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
     return current_user
 
+
+def create_refresh_token(data: dict):
+    expires = datetime.utcnow() + timedelta(days=30)  # ✅ valid for 30 days
+    to_encode = data.copy()
+    to_encode.update({"exp": expires})
+    return jwt.encode(to_encode, settings.REFRESH_TOKEN_SECRET_KEY, algorithm=settings.ALGORITHM)

@@ -1,14 +1,22 @@
+# app/core/config.py
 from pydantic_settings import BaseSettings
+
 
 class Settings(BaseSettings):
     # === App Environment ===
-    ENV: str = "production"  # 👈 ADD THIS
+    # ENV: str = "production"  # 👈 ADD THIS
+    ENV: str = "development"  # ✅ Default to dev
+
+    # === Frontend URL === ✅ REQUIRED
+    FRONTEND_URL: str = "http://127.0.0.1:3000"
 
     # === Database & JWT Auth ===
     DATABASE_URL: str = "sqlite:///./real_estate.db"
     SECRET_KEY: str = "supersecretkey"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
+
+    REFRESH_TOKEN_SECRET_KEY: str
 
     # === Email Settings ===
     MAIL_USERNAME: str = "youremail@gmail.com"
@@ -23,5 +31,7 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
+        extra = "allow"
+
 
 settings = Settings()
