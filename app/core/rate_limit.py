@@ -14,21 +14,32 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
 
-        # 🧠 Allow safe or static requests
-        if path in ["/", "/favicon.ico"] or path.startswith("/static"):
+        # ✅ Skip rate limit for auth, profile, favorites & preflight requests
+        skip_paths = [
+            "/",
+            "/favicon.ico",
+        ]
+        skip_startswith = [
+            "/auth",
+            "/users/me",  # token validation
+            "/favorites", # fav fetch
+            "/static",
+        ]
+
+        if request.method == "OPTIONS" or path in skip_paths or any(path.startswith(p) for p in skip_startswith):
             return await call_next(request)
 
         client_ip = request.client.host
         now = time.time()
         window_start = now - self.window
 
-        # Clean old requests
         self.requests.setdefault(client_ip, [])
         self.requests[client_ip] = [t for t in self.requests[client_ip] if t > window_start]
 
-        # Check limit
         if len(self.requests[client_ip]) >= self.limit:
             raise HTTPException(status_code=429, detail="Too many requests — slow down")
 
         self.requests[client_ip].append(now)
         return await call_next(request)
+
+
