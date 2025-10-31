@@ -119,8 +119,9 @@ class OrderBase(BaseModel):
     listing_id: int
 
 
-class OrderCreate(OrderBase):
-    pass
+# app/schemas.py
+class OrderCreate(BaseModel):
+    listing_id: int
 
 
 class OrderUpdate(BaseModel):
@@ -139,7 +140,7 @@ class OrderResponse(BaseModel):
 
 
 class PaymentRequest(BaseModel):
-    order_id: int
+    # order_id: int
     payment_method: str
     amount: float
 
