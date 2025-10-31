@@ -73,7 +73,12 @@ def get_listing(listing_id: int, db: Session = Depends(get_db)):
     listing = db.query(models.Listing).filter(models.Listing.id == listing_id).first()
     if not listing:
         raise HTTPException(status_code=404, detail="Listing not found")
-    return listing
+
+    # Attach agent info for frontend
+    response = listing.__dict__.copy()
+    if listing.owner:
+        response["agent"] = listing.owner
+    return response
 
 
 @router.post("/", response_model=schemas.ListingResponse, status_code=status.HTTP_201_CREATED)

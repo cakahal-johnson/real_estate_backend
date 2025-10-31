@@ -2,6 +2,7 @@
 from sqlalchemy import Column, Integer, String, Text, Float, DateTime, func, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 from app.database import Base
+from sqlalchemy.dialects.sqlite import JSON  # for SQLite, or use postgresql.JSON for Postgres
 
 
 class User(Base):
@@ -12,6 +13,8 @@ class User(Base):
     email = Column(String(150), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
     role = Column(String(20), default="buyer")  # 'agent' or 'buyer'
+    phone = Column(String(50), nullable=True)  # new
+    photo = Column(String(255), nullable=True)  # optional agent avatar
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # ✅ Define relationship to listings
@@ -30,8 +33,9 @@ class Listing(Base):
     description = Column(String)
     price = Column(Float, nullable=False)
     location = Column(String)
-    image_url = Column(String)
-    owner_id = Column(Integer, ForeignKey("users.id"))  # ✅ foreign key link
+    main_image = Column(String, nullable=True)  # New
+    images = Column(JSON, nullable=True, default=[])  # Array of extra images
+    owner_id = Column(Integer, ForeignKey("users.id"))  # foreign key link
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -90,5 +94,16 @@ class ChatMessage(Base):
 
     sender = relationship("User", foreign_keys=[sender_id])
     listing = relationship("Listing", foreign_keys=[listing_id])
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    sender_id = Column(Integer, ForeignKey("users.id"))
+    receiver_id = Column(Integer, ForeignKey("users.id"))
+    listing_id = Column(Integer, ForeignKey("listings.id"))
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

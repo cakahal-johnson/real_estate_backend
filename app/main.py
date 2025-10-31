@@ -7,6 +7,8 @@ from app.routers import listings, users, auth, favorites, admin, orders, chat
 from app.core.cors import setup_cors
 from app.core.errors import add_exception_handlers
 from app.core.rate_limit import RateLimitMiddleware
+from app.routers import messages
+from fastapi.staticfiles import StaticFiles
 
 
 # Create all DB tables automatically
@@ -34,6 +36,8 @@ app.include_router(favorites.router)
 app.include_router(admin.router)
 app.include_router(orders.router)
 app.include_router(chat.router)
+app.include_router(messages.router)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 
 @app.get("/")

@@ -2,6 +2,18 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
+from app import schemas
+
+
+class UserBase(BaseModel):
+    id: int
+    full_name: Optional[str]
+    email: EmailStr
+    phone: Optional[str] = None
+    photo: Optional[str] = None
+
+    class Config:
+        from_attributes = True
 
 
 # --- Listing schemas ---
@@ -10,7 +22,8 @@ class ListingBase(BaseModel):
     description: Optional[str] = None
     price: float
     location: Optional[str] = None
-    image_url: Optional[str] = None
+    main_image: Optional[str] = None
+    images: Optional[List[str]] = []
 
 
 class ListingCreate(ListingBase):
@@ -26,6 +39,7 @@ class ListingResponse(ListingBase):
     owner_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    agent: Optional[UserBase] = None  # For nested frontend data
 
     class Config:
         # allow ORM objects (SQLAlchemy)
@@ -171,3 +185,26 @@ class ChatMessageBase(BaseModel):
 
 class FavoriteCheckResponse(BaseModel):
     is_favorited: bool
+
+
+# --- Message schemas ---
+class MessageBase(BaseModel):
+    receiver_id: int
+    listing_id: Optional[int] = None
+    content: str
+
+
+class MessageCreate(MessageBase):
+    pass
+
+
+class MessageOut(BaseModel):
+    id: int
+    sender_id: int
+    receiver_id: int
+    listing_id: Optional[int] = None
+    content: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
