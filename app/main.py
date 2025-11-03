@@ -9,6 +9,7 @@ from app.core.errors import add_exception_handlers
 from app.core.rate_limit import RateLimitMiddleware
 from fastapi.staticfiles import StaticFiles
 import asyncio
+from app.routers import paystack
 
 # ✅ Import the new WebSocket manager
 from app.websocket_manager import (
@@ -38,6 +39,7 @@ app.include_router(admin.router)
 app.include_router(orders.router)
 app.include_router(chat.router)
 app.include_router(messages.router)
+app.include_router(paystack.router)
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
@@ -45,7 +47,6 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 @app.get("/")
 def root():
     return {"message": "🏡 RealEstateHub API is running ✅"}
-
 
 
 # =====================================
