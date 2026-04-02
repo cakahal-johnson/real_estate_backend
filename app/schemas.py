@@ -2,7 +2,6 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
-from app import schemas
 
 
 class UserBase(BaseModel):
@@ -60,6 +59,8 @@ class UserResponse(BaseModel):
     full_name: Optional[str] = None
     email: EmailStr
     role: str
+    phone: Optional[str] = None  # ADD
+    photo: Optional[str] = None  # ADD
     created_at: datetime
 
     class Config:
@@ -112,6 +113,8 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     email: Optional[str] = None
     password: Optional[str] = None
+    phone: Optional[str] = None  # ADD
+    photo: Optional[str] = None  # ADD
 
 
 # --- Order schemas ---
@@ -133,7 +136,14 @@ class OrderResponse(BaseModel):
     buyer_id: int
     listing_id: int
     status: str
+    payment_status: Optional[str] = None
+    payment_method: Optional[str] = None
+    payment_reference: Optional[str] = None
+    amount: Optional[float] = None
+    admin_confirmed: Optional[int] = 0
+    agent_document: Optional[str] = None
     created_at: datetime
+    completed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -151,22 +161,6 @@ class PaymentResponse(BaseModel):
     payment_reference: Optional[str]
     amount: float
     timestamp: datetime
-
-    class Config:
-        from_attributes = True
-
-
-class OrderResponse(BaseModel):
-    id: int
-    buyer_id: int
-    listing_id: int
-    status: str
-    payment_status: Optional[str] = None
-    payment_method: Optional[str] = None
-    payment_reference: Optional[str] = None
-    amount: Optional[float] = None
-    created_at: datetime
-    completed_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

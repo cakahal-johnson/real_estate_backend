@@ -1,6 +1,6 @@
 # app/routers/favorites.py
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from typing import List, Dict, Union
 from app import models, schemas
 from app.database import get_db
@@ -40,9 +40,10 @@ def get_my_favorites(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_active_user)
 ):
-    return db.query(models.Favorite).filter(
-        models.Favorite.user_id == current_user.id
-    ).all()
+    return db.query(models.Favorite)\
+        .options(joinedload(models.Favorite.listing))\
+        .filter(models.Favorite.user_id == current_user.id)\
+        .all()
 
 
 @router.get("/dashboard", response_model=List[Dict[str, Union[str, int]]])

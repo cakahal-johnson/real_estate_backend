@@ -35,6 +35,7 @@ class Listing(Base):
     location = Column(String)
     main_image = Column(String, nullable=True)  # New
     images = Column(JSON, nullable=True, default=[])  # Array of extra images
+    status = Column(String(50), default="pending")  # approved / pending
     owner_id = Column(Integer, ForeignKey("users.id"))  # foreign key link
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -76,6 +77,10 @@ class Order(Base):
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # 👇 New fields
+    admin_confirmed = Column(Integer, default=0)  # 0 = No, 1 = Yes
+    agent_document = Column(String(255), nullable=True)  # uploaded file (pdf, doc, etc.)
+
     buyer = relationship("User", back_populates="orders")
     listing = relationship("Listing", back_populates="orders")
 
@@ -107,3 +112,16 @@ class Message(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class DocumentSubmission(Base):
+    __tablename__ = "document_submissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
+    agent_id = Column(Integer, ForeignKey("users.id"))
+    file_url = Column(String(255), nullable=False)
+    status = Column(String(50), default="pending")  # pending / reviewed / approved / rejected
+    remarks = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    order = relationship("Order")
+    agent = relationship("User")

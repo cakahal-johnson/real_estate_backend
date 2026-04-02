@@ -1,6 +1,6 @@
 # app/core/security.py
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 from passlib.context import CryptContext
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
@@ -14,6 +14,9 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
 
+# -------------------------------------------------------------------
+# 🔐 PASSWORD HELPERS
+# -------------------------------------------------------------------
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
@@ -22,6 +25,9 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
+# -------------------------------------------------------------------
+# 🪪 JWT TOKEN HELPERS
+# -------------------------------------------------------------------
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
     expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
@@ -38,7 +44,16 @@ def decode_access_token(token: str):
         return None
 
 
-# --- DB dependency for security helper ---
+def create_refresh_token(data: dict):
+    expires = datetime.utcnow() + timedelta(days=30)  # ✅ valid for 30 days
+    to_encode = data.copy()
+    to_encode.update({"exp": expires})
+    return jwt.encode(to_encode, settings.REFRESH_TOKEN_SECRET_KEY, algorithm=settings.ALGORITHM)
+
+
+# -------------------------------------------------------------------
+# 💾 DB DEPENDENCY
+# -------------------------------------------------------------------
 def get_db():
     db = SessionLocal()
     try:
@@ -47,7 +62,9 @@ def get_db():
         db.close()
 
 
-# --- Current user dependency ---
+# -------------------------------------------------------------------
+# 👤 CURRENT USER HELPERS
+# -------------------------------------------------------------------
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)) -> models.User:
     payload = decode_access_token(token)
     if not payload:
@@ -66,6 +83,9 @@ def get_current_active_user(current_user: models.User = Depends(get_current_user
     return current_user
 
 
+# -------------------------------------------------------------------
+# 🧩 ROLE-BASED ACCESS HELPERS
+# -------------------------------------------------------------------
 def require_agent(current_user: models.User = Depends(get_current_active_user)):
     if current_user.role != "agent":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agent role required")
@@ -78,8 +98,15 @@ def require_admin(current_user: models.User = Depends(get_current_active_user)):
     return current_user
 
 
-def create_refresh_token(data: dict):
-    expires = datetime.utcnow() + timedelta(days=30)  # ✅ valid for 30 days
-    to_encode = data.copy()
-    to_encode.update({"exp": expires})
-    return jwt.encode(to_encode, settings.REFRESH_TOKEN_SECRET_KEY, algorithm=settings.ALGORITHM)
+def require_role(current_user: models.User, allowed_roles: List[str]):
+    """
+    ✅ Generic role checker.
+    Example:
+        require_role(current_user, ["agent", "admin"])
+    """
+    if current_user.role not in allowed_roles:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Access denied. Allowed roles: {', '.join(allowed_roles)}",
+        )
+    return current_user

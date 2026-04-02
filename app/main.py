@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 import asyncio
 from app.routers import paystack
 
-# ✅ Import the new WebSocket manager
+# Import the new WebSocket manager
 from app.websocket_manager import (
     connect_user,
     disconnect_user,
@@ -20,8 +20,8 @@ from app.websocket_manager import (
     mark_message_seen,
 )
 
-Base.metadata.create_all(bind=engine)
 app = FastAPI(title="RealEstateHub API")
+Base.metadata.create_all(bind=engine)
 
 if settings.ENV != "production":
     print("⚠️ Rate limit disabled in development mode")
