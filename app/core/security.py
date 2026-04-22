@@ -30,10 +30,18 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 # -------------------------------------------------------------------
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
     to_encode = data.copy()
-    expire = datetime.utcnow() + (expires_delta if expires_delta else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES))
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
-    return encoded_jwt
+    expire = datetime.utcnow() + (
+        expires_delta if expires_delta else timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+
+    # ✅ normalize payload
+    to_encode.update({
+        "exp": expire,
+        "user_id": data.get("user_id") or data.get("sub"),
+        "role": data.get("role"),
+    })
+
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def decode_access_token(token: str):
@@ -45,10 +53,19 @@ def decode_access_token(token: str):
 
 
 def create_refresh_token(data: dict):
-    expires = datetime.utcnow() + timedelta(days=30)  # ✅ valid for 30 days
+    expires = datetime.utcnow() + timedelta(days=30)
+
     to_encode = data.copy()
-    to_encode.update({"exp": expires})
-    return jwt.encode(to_encode, settings.REFRESH_TOKEN_SECRET_KEY, algorithm=settings.ALGORITHM)
+    to_encode.update({
+        "exp": expires,
+        "type": "refresh"  # ✅ ADD THIS
+    })
+
+    return jwt.encode(
+        to_encode,
+        settings.REFRESH_TOKEN_SECRET_KEY,
+        algorithm=settings.ALGORITHM
+    )
 
 
 # -------------------------------------------------------------------
@@ -87,8 +104,11 @@ def get_current_active_user(current_user: models.User = Depends(get_current_user
 # 🧩 ROLE-BASED ACCESS HELPERS
 # -------------------------------------------------------------------
 def require_agent(current_user: models.User = Depends(get_current_active_user)):
-    if current_user.role != "agent":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Agent role required")
+    if current_user.role.strip().lower() not in ["agent", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Agent/Admin role required"
+        )
     return current_user
 
 
@@ -108,5 +128,14 @@ def require_role(current_user: models.User, allowed_roles: List[str]):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Access denied. Allowed roles: {', '.join(allowed_roles)}",
+        )
+    return current_user
+
+
+def require_dashboard_access(current_user: models.User = Depends(get_current_active_user)):
+    if current_user.role not in ["agent", "admin"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Dashboard access restricted to agents/admins"
         )
     return current_user

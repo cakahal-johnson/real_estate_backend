@@ -1,5 +1,5 @@
 # app/schemas.py
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr,  Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -22,15 +22,22 @@ class ListingBase(BaseModel):
     price: float
     location: Optional[str] = None
     main_image: Optional[str] = None
-    images: Optional[List[str]] = []
+    images: List[str] = Field(default_factory=list)
+    videos: List[str] = Field(default_factory=list)
 
 
 class ListingCreate(ListingBase):
     pass
 
 
-class ListingUpdate(ListingBase):
-    pass
+class ListingUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    price: Optional[float] = None
+    location: Optional[str] = None
+    main_image: Optional[str] = None
+    images: Optional[List[str]] = None
+    videos: Optional[List[str]] = None
 
 
 class ListingResponse(ListingBase):
@@ -126,6 +133,18 @@ class OrderBase(BaseModel):
 class OrderCreate(BaseModel):
     listing_id: int
 
+    class Config:
+        extra = "ignore"  # 👈 ignore extra fields instead of failing
+
+
+class CartCreate(BaseModel):
+    listing_id: int
+
+
+class OrderCancelResponse(BaseModel):
+    message: str
+    order_id: int
+
 
 class OrderUpdate(BaseModel):
     status: str
@@ -145,8 +164,16 @@ class OrderResponse(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime] = None
 
+    listing: Optional[ListingResponse] = None  # ✅ REQUIRED
+
     class Config:
         from_attributes = True
+
+
+class PaginatedOrdersResponse(BaseModel):
+    orders: List[OrderResponse]
+    hasMore: bool
+    total: int  # ✅ ADD THIS
 
 
 class PaymentRequest(BaseModel):
@@ -203,3 +230,23 @@ class MessageOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# support pages
+class SupportTicketCreate(BaseModel):
+    message: str
+
+
+class SupportTicketResponse(BaseModel):
+    id: int
+    message: str
+    status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class PaystackVerifyRequest(BaseModel):
+    reference: str
+    order_id: int

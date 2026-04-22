@@ -8,8 +8,11 @@ from app.core.cors import setup_cors
 from app.core.errors import add_exception_handlers
 from app.core.rate_limit import RateLimitMiddleware
 from fastapi.staticfiles import StaticFiles
+from app.routers import cart
 import asyncio
 from app.routers import paystack
+from app.routers import support # Add
+from app.routers import recent_views
 
 # Import the new WebSocket manager
 from app.websocket_manager import (
@@ -40,6 +43,9 @@ app.include_router(orders.router)
 app.include_router(chat.router)
 app.include_router(messages.router)
 app.include_router(paystack.router)
+app.include_router(support.router)  # Add
+app.include_router(recent_views.router)
+app.include_router(cart.router)
 
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
