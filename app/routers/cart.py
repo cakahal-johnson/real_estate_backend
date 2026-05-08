@@ -1,4 +1,5 @@
 # app/routers/cart.py
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
@@ -10,7 +11,7 @@ router = APIRouter(prefix="/cart", tags=["Cart"])
 
 
 # -----------------------------
-# ➕ ADD TO CART (MATCH FRONTEND)
+# ➕ ADD TO CART (FIXED + FRONTEND SAFE)
 # -----------------------------
 @router.post("")
 def add_to_cart(
@@ -18,6 +19,7 @@ def add_to_cart(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user)
 ):
+    # 🔍 Check if item already exists
     item = db.query(models.CartItem).filter_by(
         user_id=user.id,
         listing_id=payload.listing_id
@@ -34,9 +36,29 @@ def add_to_cart(
         db.add(item)
 
     db.commit()
-    db.refresh(item)
 
-    return {"message": "added", "item_id": item.id}
+    # ✅ Reload with listing (IMPORTANT)
+    item = (
+        db.query(models.CartItem)
+        .options(joinedload(models.CartItem.listing))
+        .filter(models.CartItem.id == item.id)
+        .first()
+    )
+
+    listing = item.listing
+
+    # ✅ Return FULL item (matches frontend expectation)
+    return {
+        "id": item.id,
+        "quantity": item.quantity,
+        "listing": {
+            "id": listing.id if listing else None,
+            "title": listing.title if listing else "",
+            "price": listing.price if listing else 0,
+            "main_image": listing.main_image if listing else None,
+            "location": listing.location if listing else None,
+        }
+    }
 
 
 # -----------------------------
@@ -54,7 +76,6 @@ def get_cart(
         .all()
     )
 
-    # ✅ SAFE SERIALIZATION
     result = []
     total_quantity = 0
     total_price = 0
@@ -82,8 +103,8 @@ def get_cart(
 
     return {
         "items": result,
-        "total": total_quantity,        # for badge
-        "subtotal": total_price        # for UI
+        "total": total_quantity,   # ✅ for cart badge
+        "subtotal": total_price    # ✅ for UI
     }
 
 
@@ -102,7 +123,7 @@ def remove_from_cart(
     ).first()
 
     if not item:
-        raise HTTPException(404, "Item not found")
+        raise HTTPException(status_code=404, detail="Item not found")
 
     if item.quantity > 1:
         item.quantity -= 1

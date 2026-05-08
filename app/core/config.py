@@ -1,5 +1,7 @@
 # app/core/config.py
+from __future__ import annotations
 from pydantic_settings import BaseSettings
+from typing import Optional
 
 
 class Settings(BaseSettings):
@@ -17,6 +19,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     REFRESH_TOKEN_SECRET_KEY: str
+
+    PAYSTACK_SECRET_KEY: str
+    ADMIN_EMAIL: Optional[str] = None
 
     # === Email Settings ===
     MAIL_USERNAME: str = "youremail@gmail.com"

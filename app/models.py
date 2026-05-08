@@ -117,8 +117,10 @@ class Order(Base):
     buyer_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     listing_id = Column(Integer, ForeignKey("listings.id", ondelete="CASCADE"))
 
+    checkout_ref = Column(String(100), index=True, nullable=True)  # ✅ ADD THIS
+
     status = Column(String(50), default="pending")
-    is_cancelled = Column(Integer, default=0) # comment out
+    is_cancelled = Column(Integer, default=0)
     payment_status = Column(String(30), default="unpaid")
     payment_method = Column(String(50), nullable=True)
     payment_reference = Column(String(100), nullable=True)
@@ -126,9 +128,6 @@ class Order(Base):
 
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-    admin_confirmed = Column(Integer, default=0)
-    agent_document = Column(String(255), nullable=True)
 
     buyer = relationship("User", back_populates="orders")
     listing = relationship("Listing", back_populates="orders")
@@ -142,6 +141,9 @@ class CartItem(Base):
     listing_id = Column(Integer, ForeignKey("listings.id"))
     quantity = Column(Integer, default=1)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # ✅ ADD THIS
+    listing = relationship("Listing")
 
 
 # =========================

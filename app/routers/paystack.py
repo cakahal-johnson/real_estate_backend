@@ -1,32 +1,35 @@
 # app/routers/paystack.py
-
-import os
 import httpx
 import hmac
 import hashlib
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from sqlalchemy.orm import Session
-from datetime import datetime
 
 from app import models, database, schemas
+from app.core.security import get_current_user
 from app.schemas import PaymentRequest
 from app.utils.email_utils import send_email
+from app.core.config import settings
 
 router = APIRouter(prefix="/orders/paystack", tags=["Paystack Payments"])
 
-# ⚠️ MUST be SECRET KEY (NOT pk_test)
-PAYSTACK_SECRET_KEY = os.getenv(
-    "PAYSTACK_SECRET_KEY",
-    "sk_test_xxxxxxxxxxxxxxxxxxxxxxxxx"  # ✅ FIXED
-)
+
+# ================================
+# 🔐 CONFIG
+# ================================
+PAYSTACK_SECRET_KEY = settings.PAYSTACK_SECRET_KEY
+ADMIN_EMAIL = settings.ADMIN_EMAIL
+
+if not PAYSTACK_SECRET_KEY:
+    raise Exception("PAYSTACK_SECRET_KEY is missing")
 
 PAYSTACK_VERIFY_URL = "https://api.paystack.co/transaction/verify/{}"
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL")
 
 
 # =========================================================
-# 🔐 PAYSTACK WEBHOOK CALLBACK (SECURE)
+# 🔐 PAYSTACK WEBHOOK CALLBACK
 # =========================================================
 @router.post("/callback")
 async def paystack_callback(
@@ -40,64 +43,79 @@ async def paystack_callback(
     signature = request.headers.get("x-paystack-signature")
 
     if not signature:
-        raise HTTPException(status_code=401, detail="Missing Paystack signature")
+        raise HTTPException(status_code=401, detail="Missing signature")
 
-    # ✅ Verify signature
-    computed_signature = hmac.new(
-        PAYSTACK_SECRET_KEY.encode("utf-8"),
+    # verify signature
+    computed = hmac.new(
+        PAYSTACK_SECRET_KEY.encode(),
         body,
         hashlib.sha512
     ).hexdigest()
 
-    if signature != computed_signature:
-        raise HTTPException(status_code=401, detail="Invalid Paystack signature")
+    if computed != signature:
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
-    # -----------------------------
-    # ✅ Paystack sends event-based payload
-    # -----------------------------
+    # ================================
+    # EVENT CHECK
+    # ================================
     event = payload.get("event")
     data = payload.get("data", {})
 
     if event != "charge.success":
-        return {"message": "Event ignored"}
+        return {"message": "ignored"}
 
     reference = data.get("reference")
     metadata = data.get("metadata", {})
+
+    # =========================================================
+    # 🔥 NEW: checkout_ref SUPPORT (MULTI ORDER FLOW)
+    # =========================================================
+    checkout_ref = metadata.get("checkout_ref")
     order_id = metadata.get("order_id")
 
-    if not reference or not order_id:
-        raise HTTPException(status_code=400, detail="Missing reference or order_id")
+    if not reference:
+        raise HTTPException(status_code=400, detail="Missing reference")
 
-    # -----------------------------
-    # 🔍 Find order
-    # -----------------------------
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+    # ================================
+    # FIND ORDERS
+    # ================================
+    orders = []
 
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+    if checkout_ref:
+        orders = db.query(models.Order).filter(
+            models.Order.checkout_ref == checkout_ref
+        ).all()
 
-    # ✅ Prevent duplicate webhook processing
-    if order.payment_status == "paid":
-        return {"message": "Already processed"}
+        if not orders:
+            raise HTTPException(status_code=404, detail="Orders not found")
 
-    # -----------------------------
-    # 🔍 Verify transaction with Paystack
-    # -----------------------------
-    headers = {
-        "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"
-    }
+    elif order_id:
+        order = db.query(models.Order).filter(
+            models.Order.id == order_id
+        ).first()
 
+        if not order:
+            raise HTTPException(status_code=404, detail="Order not found")
+
+        orders = [order]
+
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Missing checkout_ref or order_id"
+        )
+
+    # ================================
+    # VERIFY WITH PAYSTACK
+    # ================================
     async with httpx.AsyncClient() as client:
         resp = await client.get(
             PAYSTACK_VERIFY_URL.format(reference),
-            headers=headers
+            headers={"Authorization": f"Bearer {PAYSTACK_SECRET_KEY}"}
         )
 
     if resp.status_code != 200:
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail="Failed to verify transaction"
-        )
+        raise HTTPException(status_code=400, detail="Verification failed")
 
     verify_data = resp.json().get("data", {})
 
@@ -107,28 +125,36 @@ async def paystack_callback(
     amount_paid = verify_data.get("amount", 0) / 100
     channel = verify_data.get("channel")
 
-    # -----------------------------
-    # ✅ Update order
-    # -----------------------------
-    order.payment_status = "paid"
-    order.status = "approved"
-    order.payment_reference = reference
-    order.payment_method = channel or "paystack"
-    order.amount = amount_paid
-    order.completed_at = datetime.utcnow()
+    # ================================
+    # UPDATE ALL ORDERS
+    # ================================
+    for order in orders:
 
-    # ✅ mark listing sold
-    if order.listing:
-        order.listing.status = "sold"
+        if order.payment_status == "paid":
+            continue
+
+        order.payment_status = "paid"
+        order.status = "approved"
+        order.payment_reference = reference
+        order.payment_method = channel or "paystack"
+        order.amount = amount_paid
+        order.completed_at = datetime.utcnow()
+
+        if order.listing:
+            order.listing.status = "sold"
 
     db.commit()
-    db.refresh(order)
 
-    # -----------------------------
-    # 👥 Fetch users safely
-    # -----------------------------
-    buyer = db.query(models.User).filter(models.User.id == order.buyer_id).first()
-    listing = order.listing
+    first_order = orders[0]
+
+    # ================================
+    # USERS
+    # ================================
+    buyer = db.query(models.User).filter(
+        models.User.id == first_order.buyer_id
+    ).first()
+
+    listing = first_order.listing
 
     agent = None
     if listing and listing.owner_id:
@@ -136,41 +162,35 @@ async def paystack_callback(
             models.User.id == listing.owner_id
         ).first()
 
-    # -----------------------------
-    # 📧 Email content (safe fields)
-    # -----------------------------
+    # ================================
+    # EMAILS
+    # ================================
     buyer_name = buyer.full_name or "Customer"
     agent_name = agent.full_name if agent else "Agent"
 
-    buyer_subject = f"Payment Confirmation - Order #{order.id}"
+    buyer_subject = f"Payment Successful - Order(s) Confirmed"
     buyer_body = f"""
 Hi {buyer_name},
 
-Your payment of ₦{amount_paid:,.2f} for "{listing.title if listing else 'a property'}" was successful.
+Your payment of ₦{amount_paid:,.2f} was successful.
 
 Reference: {reference}
 Method: {channel}
-Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC
+Time: {datetime.utcnow()}
 
-Thank you for using RealEstateHub.
+You have {len(orders)} order(s) confirmed.
 """
 
-    agent_subject = f"New Payment Received - Order #{order.id}"
+    agent_subject = "New Payment Received"
     agent_body = f"""
 Hi {agent_name},
 
-A buyer ({buyer.email}) completed payment of ₦{amount_paid:,.2f}
-for "{listing.title if listing else 'a property'}".
+A buyer has completed payment for {len(orders)} order(s).
 
 Reference: {reference}
 Channel: {channel}
-
-Please contact the buyer.
 """
 
-    # -----------------------------
-    # 📤 Send emails
-    # -----------------------------
     if buyer:
         background_tasks.add_task(
             send_email,
@@ -191,21 +211,101 @@ Please contact the buyer.
 
     return {
         "message": "Payment verified",
-        "order_id": order.id,
-        "status": order.payment_status,
-    }
-
-
-@router.post("/payments/initiate")
-def initiate_payment(payload: PaymentRequest):
-    # call Paystack API here
-    return {
-        "authorization_url": "https://paystack.com/pay/xxxx"
+        "orders": [o.id for o in orders],
+        "status": "paid"
     }
 
 
 # =========================================================
-# 🧪 DEV VERIFY (FRONTEND SAFE)
+# 💳 INITIATE PAYMENT (UPDATED FOR checkout_ref)
+# =========================================================
+@router.post("/payments/initiate")
+async def initiate_payment(
+    payload: PaymentRequest,
+    db: Session = Depends(database.get_db),
+    user: models.User = Depends(get_current_user),
+):
+    url = "https://api.paystack.co/transaction/initialize"
+
+    headers = {
+        "Authorization": f"Bearer {PAYSTACK_SECRET_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    if not user.email:
+        raise HTTPException(status_code=400, detail="User email missing")
+
+    data = {
+        "email": user.email,
+        "amount": int(payload.amount * 100),
+
+        "metadata": {
+            "checkout_ref": payload.checkout_ref,
+            "order_ids": payload.order_ids
+        },
+
+        "callback_url": "http://localhost:3000/checkout/success"
+    }
+
+    async with httpx.AsyncClient() as client:
+        res = await client.post(url, json=data, headers=headers)
+
+    response = res.json()
+
+    if not response.get("status"):
+        raise HTTPException(
+            status_code=400,
+            detail=response.get("message", "Payment initialization failed")
+        )
+
+    reference = response["data"]["reference"]
+
+    # ✅ FIX: attach reference AFTER response exists
+    if payload.order_ids:
+        db.query(models.Order).filter(
+            models.Order.id.in_(payload.order_ids)
+        ).update(
+            {"payment_reference": reference},
+            synchronize_session=False
+        )
+
+        db.commit()
+
+    return {
+        "authorization_url": response["data"]["authorization_url"],
+        "access_code": response["data"]["access_code"],
+        "reference": reference
+    }
+
+
+# =========================================================
+# 🔎 VERIFY PAYMENT BY REFERENCE (CHECKOUT FLOW)
+# =========================================================
+@router.get("/verify/{reference}")
+def verify_by_reference(
+    reference: str,
+    db: Session = Depends(database.get_db),
+):
+    orders = db.query(models.Order).filter(
+        models.Order.payment_reference == reference
+    ).all()
+
+    # ✅ DO NOT FAIL HARD
+    if not orders:
+        return {
+            "status": "processing",
+            "orders": [],
+            "message": "Payment is still being processed"
+        }
+
+    return {
+        "status": "paid",
+        "orders": [o.id for o in orders]
+    }
+
+
+# =========================================================
+# 🧪 MANUAL VERIFY (DEV)
 # =========================================================
 @router.post("/verify")
 def verify_payment_manual(
@@ -222,13 +322,11 @@ def verify_payment_manual(
     if order.payment_status == "paid":
         return {"message": "Already verified", "order_id": order.id}
 
-    # ✅ update once (no duplicates)
     order.payment_status = "paid"
     order.status = "approved"
     order.payment_reference = payload.reference
     order.completed_at = datetime.utcnow()
 
-    # ✅ mark listing sold
     if order.listing:
         order.listing.status = "sold"
 
@@ -236,8 +334,7 @@ def verify_payment_manual(
     db.refresh(order)
 
     return {
-        "message": "Payment verified successfully",
+        "message": "Payment verified",
         "order_id": order.id,
-        "payment_status": order.payment_status,
-        "reference": order.payment_reference,
+        "status": order.payment_status
     }

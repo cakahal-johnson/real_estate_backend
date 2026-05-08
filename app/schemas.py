@@ -177,9 +177,10 @@ class PaginatedOrdersResponse(BaseModel):
 
 
 class PaymentRequest(BaseModel):
-    # order_id: int
-    payment_method: str
+    checkout_ref: str
+    order_ids: List[int] = []
     amount: float
+    payment_method: str = "paystack"
 
 
 class PaymentResponse(BaseModel):

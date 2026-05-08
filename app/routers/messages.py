@@ -6,6 +6,7 @@ from app import models, schemas
 from app.core.security import get_current_user
 from app.websocket_manager import send_personal_message
 import asyncio
+from sqlalchemy import or_, and_, desc
 
 router = APIRouter(prefix="/messages", tags=["Messages"])
 
@@ -80,3 +81,61 @@ def get_sent_messages(
         .order_by(models.Message.created_at.desc())
         .all()
     )
+
+
+@router.get("/conversations")
+def get_conversations(
+        db: Session = Depends(get_db),
+        current_user: models.User = Depends(get_current_user),
+):
+    """
+    Returns latest conversation per user.
+    """
+
+    messages = (
+        db.query(models.Message)
+        .filter(
+            or_(
+                models.Message.sender_id == current_user.id,
+                models.Message.receiver_id == current_user.id,
+            )
+        )
+        .order_by(desc(models.Message.created_at))
+        .all()
+    )
+
+    conversations = {}
+
+    for msg in messages:
+        other_user_id = (
+            msg.receiver_id
+            if msg.sender_id == current_user.id
+            else msg.sender_id
+        )
+
+        # Keep latest message only
+        if other_user_id in conversations:
+            continue
+
+        other_user = (
+            db.query(models.User)
+            .filter(models.User.id == other_user_id)
+            .first()
+        )
+
+        conversations[other_user_id] = {
+            "id": msg.id,
+            "message": msg.content,
+            "sender_id": msg.sender_id,
+            "receiver_id": msg.receiver_id,
+            "sender_name": (
+                other_user.full_name
+                if other_user
+                else "User"
+            ),
+            "created_at": msg.created_at,
+            "listing_id": msg.listing_id,
+            "other_user_id": other_user_id,
+        }
+
+    return list(conversations.values())

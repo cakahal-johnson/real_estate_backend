@@ -15,6 +15,9 @@ from datetime import datetime
 import uuid
 from sqlalchemy import func
 
+from fastapi.responses import StreamingResponse
+from app.utils.invoice import generate_invoice_pdf
+
 # ✅ FIXED IMPORTS
 from app import models, schemas
 from app.database import get_db
@@ -44,34 +47,51 @@ def create_order_from_cart(
     db: Session = Depends(get_db),
     user: models.User = Depends(get_current_user),
 ):
-    cart_items = db.query(models.CartItem).filter_by(user_id=user.id).all()
+    try:
+        cart_items = db.query(models.CartItem).filter_by(user_id=user.id).all()
 
-    if not cart_items:
-        raise HTTPException(400, "Cart is empty")
+        if not cart_items:
+            raise HTTPException(status_code=400, detail="Cart is empty")
 
-    created_orders = []
+        created_orders = []
 
-    for item in cart_items:
-        listing = db.query(models.Listing).filter_by(id=item.listing_id).first()
+        # ✅ GENERATE checkout_ref ONCE
+        checkout_ref = str(uuid.uuid4())
 
-        if not listing:
-            continue
+        for item in cart_items:
+            listing = db.query(models.Listing).filter_by(id=item.listing_id).first()
+            if not listing:
+                continue
 
-        order = models.Order(
-            buyer_id=user.id,
-            listing_id=item.listing_id,
-            status="pending",
-            amount=listing.price,
-        )
+            order = models.Order(
+                buyer_id=user.id,
+                listing_id=item.listing_id,
+                status="pending",
+                payment_status="unpaid",
+                amount=listing.price,
+                checkout_ref=checkout_ref,  # ✅ FIXED
+            )
 
-        db.add(order)
-        created_orders.append(order)
+            db.add(order)
+            created_orders.append(order)
 
-        db.delete(item)  # clear cart
+            db.delete(item)
 
-    db.commit()
+        db.commit()
 
-    return {"order_id": created_orders[0].id if created_orders else None}
+        if not created_orders:
+            raise HTTPException(status_code=400, detail="No valid orders created")
+
+        return {
+            "checkout_ref": checkout_ref,  # ✅ now valid
+            "order_ids": [o.id for o in created_orders],
+            "count": len(created_orders),
+            "total_amount": sum(o.amount for o in created_orders)
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # -------------------------------------------------------------------
@@ -170,3 +190,21 @@ def get_orders(
         "hasMore": page * page_size < total,
         "total": total,
     }
+
+
+@router.get("/{order_id}/receipt")
+def get_invoice(order_id: int, db: Session = Depends(get_db)):
+    order = db.query(models.Order).filter(models.Order.id == order_id).first()
+
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    pdf_buffer = generate_invoice_pdf(order)
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"attachment; filename=invoice-{order.id}.pdf"
+        }
+    )
