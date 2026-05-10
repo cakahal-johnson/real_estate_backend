@@ -10,6 +10,27 @@ from app import models, schemas
 from app.database import get_db
 from app.core.security import get_current_active_user, require_agent
 
+from geopy.geocoders import Nominatim
+
+
+geolocator = Nominatim(user_agent="real_estate_app")
+
+
+def get_coordinates(location: str):
+    if not location:
+        return None, None
+
+    try:
+        geo = geolocator.geocode(location, timeout=10)
+
+        if geo:
+            return geo.latitude, geo.longitude
+
+    except Exception as e:
+        print("Geocoding error:", str(e))
+
+    return None, None
+
 
 router = APIRouter(prefix="/listings", tags=["Listings"])
 
@@ -159,19 +180,45 @@ def get_listing(listing_id: int, db: Session = Depends(get_db)):
 # =========================
 # ➕ CREATE LISTING
 # =========================
-@router.post("/", response_model=schemas.ListingResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/",
+    response_model=schemas.ListingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_listing(
     listing: schemas.ListingCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_agent),
 ):
-    data = listing.dict(exclude={"images", "videos", "main_image"})
+    data = listing.model_dump(
+        exclude={
+            "images",
+            "videos",
+            "main_image",
+            "lat",
+            "lng",
+        }
+    )
 
-    clean_images = [img for img in listing.images if img and img.strip()]
+    clean_images = [
+        img for img in listing.images
+        if img and img.strip()
+    ]
+
+    clean_videos = [
+        vid for vid in listing.videos
+        if vid and vid.strip()
+    ]
+
+    # 📍 Auto geocode
+    lat, lng = get_coordinates(listing.location)
 
     new_listing = models.Listing(
         **data,
+        lat=lat,
+        lng=lng,
         images=clean_images,
+        videos=clean_videos,
         main_image=clean_images[0] if clean_images else None,
         owner_id=current_user.id,
     )
@@ -179,7 +226,11 @@ def create_listing(
     db.add(new_listing)
     db.commit()
     db.refresh(new_listing)
-    return new_listing
+
+    return {
+        **new_listing.__dict__,
+        "agent": new_listing.owner,
+    }
 
 
 # =========================
@@ -202,13 +253,32 @@ def update_listing(
     if listing.owner_id != current_user.id and current_user.role != "agent":
         raise HTTPException(status_code=403, detail="Not authorized")
 
-    data = updated.dict(exclude_unset=True, exclude_none=True)
-    data.pop("videos", None)
+    data = updated.model_dump(
+        exclude_unset=True,
+        exclude_none=True
+    )
 
     if "images" in data:
-        clean_images = [img for img in data["images"] if img and img.strip()]
+        clean_images = [
+            img for img in data["images"]
+            if img and img.strip()
+        ]
+
         data["images"] = clean_images
         data["main_image"] = clean_images[0] if clean_images else None
+
+    if "videos" in data:
+        clean_videos = [
+            vid for vid in data["videos"]
+            if vid and vid.strip()
+        ]
+
+        data["videos"] = clean_videos
+
+    if "location" in data:
+        lat, lng = get_coordinates(data["location"])
+        data["lat"] = lat
+        data["lng"] = lng
 
     for k, v in data.items():
         setattr(listing, k, v)

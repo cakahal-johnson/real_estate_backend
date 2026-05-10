@@ -53,15 +53,27 @@ class Listing(Base):
     description = Column(String)
     price = Column(Float, nullable=False)
     location = Column(String)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     main_image = Column(String, nullable=True)
-    images = Column(JSON, nullable=True, default=[])
+    images = Column(JSON, nullable=True, default=list)
+    videos = Column(JSON, nullable=True, default=list)
     status = Column(String(50), default="pending")
     owner_id = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
     # Relationships
     owner = relationship("User", back_populates="listings")
+
+    @property
+    def agent(self):
+        return self.owner
+
     favorited_by = relationship("Favorite", back_populates="listing", cascade="all, delete")
     orders = relationship("Order", back_populates="listing", cascade="all, delete")
 
@@ -125,6 +137,8 @@ class Order(Base):
     payment_method = Column(String(50), nullable=True)
     payment_reference = Column(String(100), nullable=True)
     amount = Column(Float, nullable=True)
+    admin_confirmed = Column(Integer, default=0)
+    agent_document = Column(String(255), nullable=True)
 
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -155,15 +169,93 @@ class ChatMessage(Base):
     id = Column(Integer, primary_key=True, index=True)
     room_id = Column(String, index=True)
     sender_id = Column(Integer, ForeignKey("users.id"))
-    receiver_id = Column(Integer, nullable=True)
+    receiver_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     listing_id = Column(Integer, ForeignKey("listings.id"), nullable=True)
 
     message = Column(Text, nullable=False)
     timestamp = Column(DateTime(timezone=True), server_default=func.now())
     is_read = Column(Integer, default=0)
 
-    sender = relationship("User", foreign_keys=[sender_id])
+    # Relationships
+    sender = relationship("User", foreign_keys=[sender_id], backref="sent_messages")
+
+    receiver = relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+
     listing = relationship("Listing", foreign_keys=[listing_id])
+
+
+class ChatRoom(Base):
+    __tablename__ = "chat_rooms"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    room_id = Column(String, unique=True, index=True, nullable=False)
+
+    listing_id = Column(
+        Integer,
+        ForeignKey("listings.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    buyer_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    agent_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # 🔥 NEW
+    call_active = Column(Integer, default=0)
+
+    # 🔥 NEW
+    last_message = Column(Text, nullable=True)
+
+    # 🔥 NEW
+    last_message_at = Column(DateTime(timezone=True), nullable=True)
+
+    # 🔥 NEW
+    created_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+    # Relationships
+    listing = relationship("Listing")
+
+    buyer = relationship(
+        "User",
+        foreign_keys=[buyer_id],
+    )
+
+    agent = relationship(
+        "User",
+        foreign_keys=[agent_id],
+    )
+
+    # Prevent duplicate rooms
+    __table_args__ = (
+        UniqueConstraint(
+            "listing_id",
+            "buyer_id",
+            "agent_id",
+            name="unique_chat_room",
+        ),
+    )
 
 
 # =========================
@@ -176,6 +268,9 @@ class Message(Base):
     sender_id = Column(Integer, ForeignKey("users.id"))
     receiver_id = Column(Integer, ForeignKey("users.id"))
     listing_id = Column(Integer, ForeignKey("listings.id"))
+
+    delivered = Column(Integer, default=0)
+    seen = Column(Integer, default=0)
 
     content = Column(Text, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

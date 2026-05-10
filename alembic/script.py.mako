@@ -1,22 +1,24 @@
-# alembic/script.py.mako
-"""Add owner_id to listings"""
+"""${message}
 
+Revision ID: ${up_revision}
+Revises: ${down_revision | comma,n}
+Create Date: ${create_date}
+
+"""
 from alembic import op
 import sqlalchemy as sa
+${imports if imports else ""}
 
-
-# revision identifiers
-revision = 'abcd1234'
-down_revision = None
-branch_labels = None
-depends_on = None
+# revision identifiers, used by Alembic.
+revision = ${repr(up_revision)}
+down_revision = ${repr(down_revision)}
+branch_labels = ${repr(branch_labels)}
+depends_on = ${repr(depends_on)}
 
 
 def upgrade():
-    op.add_column('listings', sa.Column('owner_id', sa.Integer(), nullable=True))
-    op.create_foreign_key(None, 'listings', 'users', ['owner_id'], ['id'])
+    ${upgrades if upgrades else "pass"}
 
 
 def downgrade():
-    op.drop_constraint(None, 'listings', type_='foreignkey')
-    op.drop_column('listings', 'owner_id')
+    ${downgrades if downgrades else "pass"}

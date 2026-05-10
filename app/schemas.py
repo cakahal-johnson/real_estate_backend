@@ -1,7 +1,8 @@
 # app/schemas.py
-from pydantic import BaseModel, EmailStr,  Field
+from pydantic import BaseModel, EmailStr,  Field, ConfigDict, field_validator
 from typing import Optional, List
 from datetime import datetime
+import re
 
 
 class UserBase(BaseModel):
@@ -11,8 +12,7 @@ class UserBase(BaseModel):
     phone: Optional[str] = None
     photo: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Listing schemas ---
@@ -21,6 +21,10 @@ class ListingBase(BaseModel):
     description: Optional[str] = None
     price: float
     location: Optional[str] = None
+
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
     main_image: Optional[str] = None
     images: List[str] = Field(default_factory=list)
     videos: List[str] = Field(default_factory=list)
@@ -35,6 +39,10 @@ class ListingUpdate(BaseModel):
     description: Optional[str] = None
     price: Optional[float] = None
     location: Optional[str] = None
+
+    lat: Optional[float] = None
+    lng: Optional[float] = None
+
     main_image: Optional[str] = None
     images: Optional[List[str]] = None
     videos: Optional[List[str]] = None
@@ -45,20 +53,65 @@ class ListingResponse(ListingBase):
     owner_id: Optional[int] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
-    agent: Optional[UserBase] = None  # For nested frontend data
 
-    class Config:
-        # allow ORM objects (SQLAlchemy)
-        # orm_mode = True
-        from_attributes = True
+    agent: Optional[UserBase] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_orm_with_agent(cls, listing):
+        data = cls.model_validate(listing)
+        data.agent = listing.owner
+        return data
 
 
 # --- User schemas ---
 class UserCreate(BaseModel):
-    full_name: Optional[str] = None
+    full_name: str
     email: EmailStr
+    phone: str
     password: str
     role: Optional[str] = "buyer"
+
+    # ✅ Full name validation
+    @field_validator("full_name")
+    @classmethod
+    def validate_name(cls, v):
+        v = v.strip()
+
+        if len(v) < 3:
+            raise ValueError("Full name must be at least 3 characters")
+
+        if not re.match(r"^[A-Za-z\s.'-]+$", v):
+            raise ValueError("Full name contains invalid characters")
+
+        return v
+
+    # ✅ Phone validation
+    @field_validator("phone")
+    @classmethod
+    def validate_phone(cls, v):
+        v = v.strip().replace(" ", "")
+
+        # Accept:
+        # +2348012345678
+        # 08012345678
+
+        if not re.match(r"^(\+234|0)[789][01]\d{8}$", v):
+            raise ValueError("Invalid phone number format")
+
+        return v
+
+    # ✅ Password validation
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v):
+        v = v.strip()
+
+        if len(v) < 6:
+            raise ValueError("Password must be at least 6 characters")
+
+        return v
 
 
 class UserResponse(BaseModel):
@@ -70,8 +123,7 @@ class UserResponse(BaseModel):
     photo: Optional[str] = None  # ADD
     created_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # --- Auth / Token schemas ---
@@ -92,8 +144,7 @@ class PaginatedListingsResponse(BaseModel):
     total: int
     items: List[ListingResponse]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # favorites responses
@@ -107,13 +158,11 @@ class FavoriteResponse(FavoriteBase):
     created_at: datetime
     listing: Optional["ListingResponse"]
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # For nested relationships
-from app.schemas import ListingResponse  # forward ref fix
-FavoriteResponse.update_forward_refs()
+FavoriteResponse.model_rebuild()
 
 
 class UserUpdate(BaseModel):
@@ -133,8 +182,7 @@ class OrderBase(BaseModel):
 class OrderCreate(BaseModel):
     listing_id: int
 
-    class Config:
-        extra = "ignore"  # 👈 ignore extra fields instead of failing
+    model_config = ConfigDict(extra="ignore")  # 👈 ignore extra fields instead of failing
 
 
 class CartCreate(BaseModel):
@@ -166,8 +214,7 @@ class OrderResponse(BaseModel):
 
     listing: Optional[ListingResponse] = None  # ✅ REQUIRED
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaginatedOrdersResponse(BaseModel):
@@ -178,7 +225,7 @@ class PaginatedOrdersResponse(BaseModel):
 
 class PaymentRequest(BaseModel):
     checkout_ref: str
-    order_ids: List[int] = []
+    order_ids: List[int] = Field(default_factory=list)
     amount: float
     payment_method: str = "paystack"
 
@@ -190,8 +237,7 @@ class PaymentResponse(BaseModel):
     amount: float
     timestamp: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ChatMessageBase(BaseModel):
@@ -199,11 +245,10 @@ class ChatMessageBase(BaseModel):
     listing_id: Optional[int] = None
     sender_id: int
     receiver_id: int
-    timestamp: datetime
+    timestamp: Optional[datetime] = None
     is_read: Optional[int] = 0  # 0 = unread, 1 = read ✅
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FavoriteCheckResponse(BaseModel):
@@ -227,10 +272,13 @@ class MessageOut(BaseModel):
     receiver_id: int
     listing_id: Optional[int] = None
     content: str
+
+    delivered: Optional[int] = 0
+    seen: Optional[int] = 0
+
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # support pages
@@ -244,8 +292,7 @@ class SupportTicketResponse(BaseModel):
     status: str
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PaystackVerifyRequest(BaseModel):

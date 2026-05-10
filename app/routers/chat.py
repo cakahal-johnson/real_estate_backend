@@ -9,6 +9,7 @@ import json
 from app.core.security import decode_access_token
 from app.database import get_db
 from app import models, schemas
+from app.websocket_manager import send_personal_message
 
 router = APIRouter(
     prefix="/chat",
@@ -120,20 +121,31 @@ async def chat_room(
                     message=content,
                     timestamp=datetime.utcnow(),
                 )
+
                 db.add(new_msg)
                 db.commit()
                 db.refresh(new_msg)
 
+                payload = {
+                    "type": "message",
+                    "id": new_msg.id,
+                    "sender_id": user.id,
+                    "receiver_id": receiver_id,
+                    "message": content,
+                    "listing_id": listing_id,
+                    "timestamp": str(new_msg.timestamp),
+                    "is_read": new_msg.is_read,
+                }
+
+                # 1. Notify room users
                 for conn in active_connections[room_id]:
-                    await conn.send_json({
-                        "type": "message",
-                        "id": new_msg.id,
-                        "sender_id": user.id,
-                        "receiver_id": receiver_id,
-                        "message": content,
-                        "timestamp": str(new_msg.timestamp),
-                        "is_read": new_msg.is_read,
-                    })
+                    await conn.send_json(payload)
+
+                # 2. 🔥 CRITICAL FIX: notify receiver globally
+                await send_personal_message(receiver_id, {
+                    "event": "new_message",
+                    "data": payload
+                })
 
             # --- Read single message ---
             elif event_type == "read":
