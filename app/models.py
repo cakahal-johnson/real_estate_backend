@@ -259,24 +259,6 @@ class ChatRoom(Base):
 
 
 # =========================
-# 📩 DIRECT MESSAGE
-# =========================
-class Message(Base):
-    __tablename__ = "messages"
-
-    id = Column(Integer, primary_key=True, index=True)
-    sender_id = Column(Integer, ForeignKey("users.id"))
-    receiver_id = Column(Integer, ForeignKey("users.id"))
-    listing_id = Column(Integer, ForeignKey("listings.id"))
-
-    delivered = Column(Integer, default=0)
-    seen = Column(Integer, default=0)
-
-    content = Column(Text, nullable=False)
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-
-
-# =========================
 # 📄 DOCUMENT SUBMISSION
 # =========================
 class DocumentSubmission(Base):

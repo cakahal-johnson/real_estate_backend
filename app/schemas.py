@@ -256,31 +256,6 @@ class FavoriteCheckResponse(BaseModel):
 
 
 # --- Message schemas ---
-class MessageBase(BaseModel):
-    receiver_id: int
-    listing_id: Optional[int] = None
-    content: str
-
-
-class MessageCreate(MessageBase):
-    pass
-
-
-class MessageOut(BaseModel):
-    id: int
-    sender_id: int
-    receiver_id: int
-    listing_id: Optional[int] = None
-    content: str
-
-    delivered: Optional[int] = 0
-    seen: Optional[int] = 0
-
-    created_at: datetime
-
-    model_config = ConfigDict(from_attributes=True)
-
-
 # support pages
 class SupportTicketCreate(BaseModel):
     message: str

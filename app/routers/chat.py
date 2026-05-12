@@ -31,6 +31,68 @@ def get_current_user_from_token(token: str, db: Session) -> models.User:
     return user
 
 
+# --- HTTP endpoint: Latest conversations ---
+@router.get("/conversations")
+def get_chat_conversations(
+    db: Session = Depends(get_db),
+    token: str = Query(...),
+):
+    user = get_current_user_from_token(token, db)
+
+    # Get latest messages first
+    latest_messages = (
+        db.query(models.ChatMessage)
+        .filter(
+            (models.ChatMessage.sender_id == user.id)
+            | (models.ChatMessage.receiver_id == user.id)
+        )
+        .order_by(models.ChatMessage.timestamp.desc())
+        .all()
+    )
+
+    conversations = {}
+
+    for msg in latest_messages:
+        other_user_id = (
+            msg.receiver_id
+            if msg.sender_id == user.id
+            else msg.sender_id
+        )
+
+        # Skip duplicates
+        if other_user_id in conversations:
+            continue
+
+        other_user = (
+            db.query(models.User)
+            .filter(models.User.id == other_user_id)
+            .first()
+        )
+
+        conversations[other_user_id] = {
+            "id": msg.id,
+            "message": msg.message,
+            "sender_id": msg.sender_id,
+            "receiver_id": msg.receiver_id,
+            "sender_name": (
+                other_user.full_name.strip()
+                if other_user and other_user.full_name
+                else (
+                    other_user.email.split("@")[0]
+                    if other_user and other_user.email
+                    else f"User {other_user_id}"
+                )
+            ),
+            "created_at": msg.timestamp,
+            "listing_id": msg.listing_id,
+            "other_user_id": other_user_id,
+            "room_id": msg.room_id,
+            "is_read": msg.is_read,
+        }
+
+    return list(conversations.values())
+
+
 # --- WebSocket Chat Endpoint ---
 @router.websocket("/ws/{room_id}")
 async def chat_room(
@@ -80,16 +142,31 @@ async def chat_room(
             .order_by(models.ChatMessage.timestamp.asc())
             .all()
         )
-        for msg in previous_messages:
-            await websocket.send_json({
-                "type": "history",
+        history_payload = [
+            {
                 "id": msg.id,
                 "sender_id": msg.sender_id,
                 "receiver_id": msg.receiver_id,
+                "sender_name": (
+                    msg.sender.full_name.strip()
+                    if msg.sender and msg.sender.full_name
+                    else (
+                        msg.sender.email.split("@")[0]
+                        if msg.sender and msg.sender.email
+                        else f"User {msg.sender_id}"
+                    )
+                ),
                 "message": msg.message,
                 "timestamp": str(msg.timestamp),
                 "is_read": msg.is_read,
-            })
+            }
+            for msg in previous_messages
+        ]
+
+        await websocket.send_json({
+            "type": "history",
+            "messages": history_payload,
+        })
 
         # --- Handle incoming events ---
         while True:
@@ -126,11 +203,27 @@ async def chat_room(
                 db.commit()
                 db.refresh(new_msg)
 
+                room = (
+                    db.query(models.ChatRoom)
+                    .filter(models.ChatRoom.room_id == room_id)
+                    .first()
+                )
+
+                if room:
+                    room.last_message = content
+                    room.last_message_at = datetime.utcnow()
+                    db.commit()
+
                 payload = {
                     "type": "message",
                     "id": new_msg.id,
                     "sender_id": user.id,
                     "receiver_id": receiver_id,
+                    "sender_name": (
+                        user.full_name.strip()
+                        if user.full_name
+                        else user.email.split("@")[0]
+                    ),
                     "message": content,
                     "listing_id": listing_id,
                     "timestamp": str(new_msg.timestamp),

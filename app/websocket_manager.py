@@ -16,6 +16,7 @@ async def connect_user(user_id: int, websocket: WebSocket):
     online_users.add(user_id)
     print(f"✅ User {user_id} connected")
     await broadcast_user_status(user_id, "online")
+    await broadcast_online_users()
 
 
 async def disconnect_user(user_id: int, websocket: WebSocket):
@@ -25,6 +26,7 @@ async def disconnect_user(user_id: int, websocket: WebSocket):
             del active_connections[user_id]
             online_users.discard(user_id)
             await broadcast_user_status(user_id, "offline")
+            await broadcast_online_users()
     print(f"❌ User {user_id} disconnected")
 
 
@@ -39,16 +41,22 @@ async def broadcast_user_status(user_id: int, status: str):
     """Notify all users when someone goes online/offline."""
     payload = {"event": "user_status", "user_id": user_id, "status": status}
     for conns in active_connections.values():
-        for conn in conns:
-            await conn.send_json(payload)
+        for conn in conns.copy():
+            try:
+                await conn.send_json(payload)
+            except:
+                conns.remove(conn)
 
 
 async def broadcast_online_users():
     """Send list of all online users to everyone."""
     payload = {"event": "online_users", "user_ids": list(online_users)}
     for conns in active_connections.values():
-        for conn in conns:
-            await conn.send_json(payload)
+        for conn in conns.copy():
+            try:
+                await conn.send_json(payload)
+            except:
+                conns.remove(conn)
 
 
 async def mark_message_delivered(message_id: int):

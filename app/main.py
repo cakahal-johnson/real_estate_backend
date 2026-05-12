@@ -3,7 +3,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from typing import Dict, List
 from app.core.config import settings
 from app.database import Base, engine
-from app.routers import listings, users, auth, favorites, admin, orders, chat, messages
+from app.routers import listings, users, auth, favorites, admin, orders, chat
 from app.core.cors import setup_cors
 from app.core.errors import add_exception_handlers
 from app.core.rate_limit import RateLimitMiddleware
@@ -41,7 +41,7 @@ app.include_router(favorites.router)
 app.include_router(admin.router)
 app.include_router(orders.router)
 app.include_router(chat.router)
-app.include_router(messages.router)
+
 app.include_router(paystack.router)
 app.include_router(support.router)  # Add
 app.include_router(recent_views.router)
