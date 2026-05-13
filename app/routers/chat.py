@@ -1,67 +1,142 @@
 # app/routers/chat.py
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
+
+from fastapi import (
+    APIRouter,
+    WebSocket,
+    WebSocketDisconnect,
+    Depends,
+    Query,
+    HTTPException,
+    Header,
+)
+
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from typing import Dict, List
 from datetime import datetime
 import json
 
 from app.core.security import decode_access_token
 from app.database import get_db
-from app import models, schemas
-from app.websocket_manager import send_personal_message
+from app import models
+
+from app.websocket_manager import (
+    connect_room,
+    disconnect_room,
+    send_room_message,
+    send_personal_message,
+    mark_message_seen,
+    mark_message_delivered,
+    online_users,
+)
 
 router = APIRouter(
     prefix="/chat",
     tags=["Chat (WebSocket + History + Typing + ReadReceipts)"],
 )
 
-# --- Manage connected clients ---
-active_connections: Dict[str, List[WebSocket]] = {}
 
-
-# --- Helper: Get user from token ---
+# =====================================
+# AUTH HELPER
+# =====================================
 def get_current_user_from_token(token: str, db: Session) -> models.User:
     payload = decode_access_token(token)
+
     if not payload or "user_id" not in payload:
         raise HTTPException(status_code=401, detail="Invalid token")
-    user = db.query(models.User).filter(models.User.id == payload["user_id"]).first()
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.id == payload["user_id"])
+        .first()
+    )
+
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+
     return user
 
 
-# --- HTTP endpoint: Latest conversations ---
+# =====================================
+# NORMALIZE MESSAGE
+# =====================================
+def normalize_message(msg: models.ChatMessage):
+    return {
+        "id": msg.id,
+        "room_id": msg.room_id,
+        "sender_id": msg.sender_id,
+        "receiver_id": msg.receiver_id,
+
+        "sender_name": (
+            msg.sender.full_name.strip()
+            if msg.sender and msg.sender.full_name
+            else (
+                msg.sender.email.split("@")[0]
+                if msg.sender
+                else "User"
+            )
+        ),
+
+        "message": msg.message,
+        "listing_id": msg.listing_id,
+
+        "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
+
+        "is_read": bool(msg.is_read),
+        "delivered": bool(msg.delivered),
+        "seen": bool(msg.seen),
+    }
+
+
+# =====================================
+# CONVERSATIONS LIST
+# =====================================
 @router.get("/conversations")
-def get_chat_conversations(
+def get_conversations(
+    authorization: str = Header(None),
     db: Session = Depends(get_db),
-    token: str = Query(...),
 ):
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing token")
+
+    token = authorization.replace("Bearer ", "")
     user = get_current_user_from_token(token, db)
 
-    # Get latest messages first
-    latest_messages = (
-        db.query(models.ChatMessage)
+    subquery = (
+        db.query(
+            models.ChatMessage.room_id,
+            func.max(models.ChatMessage.timestamp).label("latest")
+        )
         .filter(
             (models.ChatMessage.sender_id == user.id)
             | (models.ChatMessage.receiver_id == user.id)
+        )
+        .group_by(models.ChatMessage.room_id)
+        .subquery()
+    )
+
+    latest_messages = (
+        db.query(models.ChatMessage)
+        .join(
+            subquery,
+            (models.ChatMessage.room_id == subquery.c.room_id)
+            & (models.ChatMessage.timestamp == subquery.c.latest)
         )
         .order_by(models.ChatMessage.timestamp.desc())
         .all()
     )
 
-    conversations = {}
+    conversations = []
+    seen_rooms = set()
 
     for msg in latest_messages:
-        other_user_id = (
-            msg.receiver_id
-            if msg.sender_id == user.id
-            else msg.sender_id
-        )
-
-        # Skip duplicates
-        if other_user_id in conversations:
+        if msg.room_id in seen_rooms:
             continue
+
+        seen_rooms.add(msg.room_id)
+
+        other_user_id = (
+            msg.receiver_id if msg.sender_id == user.id else msg.sender_id
+        )
 
         other_user = (
             db.query(models.User)
@@ -69,49 +144,54 @@ def get_chat_conversations(
             .first()
         )
 
-        conversations[other_user_id] = {
+        conversations.append({
             "id": msg.id,
+            "room_id": msg.room_id,
             "message": msg.message,
             "sender_id": msg.sender_id,
             "receiver_id": msg.receiver_id,
-            "sender_name": (
+            "other_user_name": (
                 other_user.full_name.strip()
                 if other_user and other_user.full_name
                 else (
                     other_user.email.split("@")[0]
-                    if other_user and other_user.email
-                    else f"User {other_user_id}"
+                    if other_user
+                    else "User"
                 )
             ),
-            "created_at": msg.timestamp,
+            "timestamp": msg.timestamp.isoformat() if msg.timestamp else None,
             "listing_id": msg.listing_id,
             "other_user_id": other_user_id,
-            "room_id": msg.room_id,
-            "is_read": msg.is_read,
-        }
+            "is_read": bool(msg.is_read),
+            "delivered": bool(msg.delivered),
+            "seen": bool(msg.seen),
+        })
 
-    return list(conversations.values())
+    return conversations
 
 
-# --- WebSocket Chat Endpoint ---
+# =====================================
+# WEBSOCKET CHAT
+# =====================================
 @router.websocket("/ws/{room_id}")
 async def chat_room(
     websocket: WebSocket,
     room_id: str,
     token: str = Query(...),
-    receiver_id: int = Query(None),
+    receiver_id: int = Query(...),
     listing_id: int = Query(None),
     db: Session = Depends(get_db),
 ):
-    user = get_current_user_from_token(token, db)
-    await websocket.accept()
 
-    if room_id not in active_connections:
-        active_connections[room_id] = []
-    active_connections[room_id].append(websocket)
+    # AUTH
+    user = get_current_user_from_token(token, db)
+
+    # CONNECT
+    await websocket.accept()
+    await connect_room(room_id, websocket)
 
     try:
-        # --- Auto-mark all unread messages as read on connect ---
+        # MARK UNREAD AS READ
         unread_msgs = (
             db.query(models.ChatMessage)
             .filter(
@@ -121,73 +201,65 @@ async def chat_room(
             )
             .all()
         )
+
         if unread_msgs:
             for msg in unread_msgs:
-                msg.is_read = 1
+                msg.is_read = True
+                msg.seen = True
+
             db.commit()
 
-            # Notify all clients in this room
-            for conn in active_connections[room_id]:
-                await conn.send_json({
-                    "type": "bulk_read",
-                    "reader_id": user.id,
-                    "room_id": room_id,
-                    "count": len(unread_msgs)
-                })
+            await send_room_message(room_id, {
+                "type": "bulk_read",
+                "reader_id": user.id,
+                "room_id": room_id,
+                "count": len(unread_msgs),
+            })
 
-        # --- Send chat history ---
+        # HISTORY
         previous_messages = (
             db.query(models.ChatMessage)
             .filter(models.ChatMessage.room_id == room_id)
             .order_by(models.ChatMessage.timestamp.asc())
             .all()
         )
-        history_payload = [
-            {
-                "id": msg.id,
-                "sender_id": msg.sender_id,
-                "receiver_id": msg.receiver_id,
-                "sender_name": (
-                    msg.sender.full_name.strip()
-                    if msg.sender and msg.sender.full_name
-                    else (
-                        msg.sender.email.split("@")[0]
-                        if msg.sender and msg.sender.email
-                        else f"User {msg.sender_id}"
-                    )
-                ),
-                "message": msg.message,
-                "timestamp": str(msg.timestamp),
-                "is_read": msg.is_read,
-            }
-            for msg in previous_messages
-        ]
 
         await websocket.send_json({
             "type": "history",
-            "messages": history_payload,
+            "messages": [normalize_message(m) for m in previous_messages],
         })
 
-        # --- Handle incoming events ---
+        # LOOP
         while True:
             raw_data = await websocket.receive_text()
-            data = json.loads(raw_data)
+
+            try:
+                data = json.loads(raw_data)
+            except json.JSONDecodeError:
+                continue
+
             event_type = data.get("type")
 
-            # --- Typing indicator ---
+            # TYPING
             if event_type == "typing":
-                for conn in active_connections[room_id]:
-                    if conn != websocket:
-                        await conn.send_json({
-                            "type": "typing",
-                            "sender_id": user.id,
-                            "message": f"{user.full_name or 'User'} is typing...",
-                        })
+                await send_room_message(
+                    room_id,
+                    {"type": "typing", "sender_id": user.id},
+                    exclude=websocket,
+                )
 
-            # --- Send new message ---
+            # STOP TYPING
+            elif event_type == "stop_typing":
+                await send_room_message(
+                    room_id,
+                    {"type": "stop_typing", "sender_id": user.id},
+                    exclude=websocket,
+                )
+
+            # MESSAGE
             elif event_type == "message":
-                content = data.get("message", "")
-                if not content.strip():
+                content = data.get("message", "").strip()
+                if not content:
                     continue
 
                 new_msg = models.ChatMessage(
@@ -197,78 +269,85 @@ async def chat_room(
                     listing_id=listing_id,
                     message=content,
                     timestamp=datetime.utcnow(),
+                    is_read=False,
+                    delivered=False,
+                    seen=False,
                 )
 
                 db.add(new_msg)
                 db.commit()
                 db.refresh(new_msg)
 
-                room = (
-                    db.query(models.ChatRoom)
-                    .filter(models.ChatRoom.room_id == room_id)
+                payload = {
+                    "type": "message",
+                    **normalize_message(new_msg),
+                }
+
+                await send_room_message(room_id, payload)
+
+                await send_personal_message(receiver_id, {
+                    "event": "new_message",
+                    "data": payload,
+                })
+
+                # DELIVERED
+                if receiver_id in online_users or receiver_id == user.id:
+                    await mark_message_delivered(new_msg.id)
+
+                    new_msg.delivered = True  # FIX consistency
+
+                    await send_room_message(room_id, {
+                        "type": "delivered",
+                        "message_id": new_msg.id,
+                    })
+
+            # READ RECEIPT
+            elif event_type == "read":
+                message_id = data.get("message_id")
+                if not message_id:
+                    continue
+
+                msg = (
+                    db.query(models.ChatMessage)
+                    .filter(models.ChatMessage.id == message_id)
                     .first()
                 )
 
-                if room:
-                    room.last_message = content
-                    room.last_message_at = datetime.utcnow()
-                    db.commit()
+                if not msg or msg.receiver_id != user.id:
+                    continue
 
-                payload = {
-                    "type": "message",
-                    "id": new_msg.id,
-                    "sender_id": user.id,
-                    "receiver_id": receiver_id,
-                    "sender_name": (
-                        user.full_name.strip()
-                        if user.full_name
-                        else user.email.split("@")[0]
-                    ),
-                    "message": content,
-                    "listing_id": listing_id,
-                    "timestamp": str(new_msg.timestamp),
-                    "is_read": new_msg.is_read,
-                }
+                msg.is_read = True
+                msg.seen = True
 
-                # 1. Notify room users
-                for conn in active_connections[room_id]:
-                    await conn.send_json(payload)
+                db.commit()
 
-                # 2. 🔥 CRITICAL FIX: notify receiver globally
-                await send_personal_message(receiver_id, {
-                    "event": "new_message",
-                    "data": payload
+                await mark_message_seen(msg.id)
+
+                await send_room_message(room_id, {
+                    "type": "read",
+                    "message_id": msg.id,
+                    "reader_id": user.id,
                 })
 
-            # --- Read single message ---
-            elif event_type == "read":
-                message_id = data.get("message_id")
-                if message_id:
-                    msg = db.query(models.ChatMessage).filter(models.ChatMessage.id == message_id).first()
-                    if msg and msg.receiver_id == user.id:
-                        msg.is_read = 1
-                        db.commit()
-                        for conn in active_connections[room_id]:
-                            await conn.send_json({
-                                "type": "read",
-                                "message_id": msg.id,
-                                "reader_id": user.id,
-                            })
-
     except WebSocketDisconnect:
-        active_connections[room_id].remove(websocket)
-        if not active_connections[room_id]:
-            del active_connections[room_id]
+        await disconnect_room(room_id, websocket)
+
+    except Exception as e:
+        print(f"❌ Chat error: {e}")
+        await disconnect_room(room_id, websocket)
 
 
-# --- HTTP endpoint: Chat history ---
-@router.get("/history/{room_id}", response_model=List[schemas.ChatMessageBase])
+# =====================================
+# HISTORY HTTP
+# =====================================
+@router.get("/history/{room_id}")
 def get_chat_history(
     room_id: str,
     token: str = Query(...),
     db: Session = Depends(get_db),
 ):
     user = get_current_user_from_token(token, db)
+
     messages = (
         db.query(models.ChatMessage)
         .filter(models.ChatMessage.room_id == room_id)
@@ -276,57 +355,52 @@ def get_chat_history(
         .all()
     )
 
-    # --- Auto-mark unread messages as read when user opens chat ---
-    unread_msgs = (
-        db.query(models.ChatMessage)
-        .filter(
-            models.ChatMessage.room_id == room_id,
-            models.ChatMessage.receiver_id == user.id,
-            models.ChatMessage.is_read == 0,
-        )
-        .all()
-    )
-    if unread_msgs:
-        for msg in unread_msgs:
-            msg.is_read = 1
-        db.commit()
+    for msg in messages:
+        if msg.receiver_id == user.id and not msg.is_read:
+            msg.is_read = True
+            msg.seen = True
 
-    return messages
+    db.commit()
+
+    return [normalize_message(m) for m in messages]
 
 
-# --- HTTP endpoint: Unread message count per room or sender ---
+# =====================================
+# UNREAD COUNTS
+# =====================================
 @router.get("/unread/{user_id}")
 def get_unread_messages(
     user_id: int,
     db: Session = Depends(get_db),
     token: str = Query(...),
 ):
-    """
-    Return unread message counts for a user.
-    Groups results by room_id and sender_id.
-    Used to display inbox badges or conversation previews.
-    """
     user = get_current_user_from_token(token, db)
 
     if user.id != user_id:
-        raise HTTPException(status_code=403, detail="You are not authorized to view this user's unread messages")
+        raise HTTPException(status_code=403, detail="Not authorized")
 
     unread_messages = (
         db.query(
             models.ChatMessage.room_id,
             models.ChatMessage.sender_id,
-            func.count(models.ChatMessage.id).label("unread_count")
+            func.count(models.ChatMessage.id).label("unread_count"),
         )
-        .filter(models.ChatMessage.receiver_id == user_id, models.ChatMessage.is_read == 0)
-        .group_by(models.ChatMessage.room_id, models.ChatMessage.sender_id)
+        .filter(
+            models.ChatMessage.receiver_id == user_id,
+            models.ChatMessage.is_read == 0,
+        )
+        .group_by(
+            models.ChatMessage.room_id,
+            models.ChatMessage.sender_id,
+        )
         .all()
     )
 
     return [
         {
-            "room_id": msg.room_id,
-            "sender_id": msg.sender_id,
-            "unread_count": msg.unread_count,
+            "room_id": m.room_id,
+            "sender_id": m.sender_id,
+            "unread_count": m.unread_count,
         }
-        for msg in unread_messages
+        for m in unread_messages
     ]

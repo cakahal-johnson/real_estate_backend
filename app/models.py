@@ -166,26 +166,137 @@ class CartItem(Base):
 class ChatMessage(Base):
     __tablename__ = "chat_messages"
 
-    id = Column(Integer, primary_key=True, index=True)
-    room_id = Column(String, index=True)
-    sender_id = Column(Integer, ForeignKey("users.id"))
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True,
+    )
+
+    # Room identifier
+    room_id = Column(
+        String,
+        nullable=False,
+        index=True,
+    )
+
+    # Sender
+    sender_id = Column(
+        Integer,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Receiver
     receiver_id = Column(
         Integer,
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
     )
-    listing_id = Column(Integer, ForeignKey("listings.id"), nullable=True)
 
-    message = Column(Text, nullable=False)
-    timestamp = Column(DateTime(timezone=True), server_default=func.now())
-    is_read = Column(Integer, default=0)
+    # Optional linked listing
+    listing_id = Column(
+        Integer,
+        ForeignKey("listings.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
-    # Relationships
-    sender = relationship("User", foreign_keys=[sender_id], backref="sent_messages")
+    # Message body
+    message = Column(
+        Text,
+        nullable=False,
+    )
 
-    receiver = relationship("User", foreign_keys=[receiver_id], backref="received_messages")
+    # Timestamp
+    timestamp = Column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
 
-    listing = relationship("Listing", foreign_keys=[listing_id])
+    # =========================
+    # MESSAGE STATES
+    # =========================
+
+    # 0 = unread
+    # 1 = read
+    is_read = Column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    # 0 = not delivered
+    # 1 = delivered to recipient device
+    delivered = Column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    # 0 = not seen
+    # 1 = seen/opened by recipient
+    seen = Column(
+        Integer,
+        default=0,
+        nullable=False,
+    )
+
+    # =========================
+    # RELATIONSHIPS
+    # =========================
+
+    sender = relationship(
+        "User",
+        foreign_keys=[sender_id],
+        backref="sent_messages",
+    )
+
+    receiver = relationship(
+        "User",
+        foreign_keys=[receiver_id],
+        backref="received_messages",
+    )
+
+    listing = relationship(
+        "Listing",
+        foreign_keys=[listing_id],
+    )
+
+    # =========================
+    # INDEXES
+    # =========================
+
+    __table_args__ = (
+
+        # Fast room history loading
+        Index(
+            "ix_chat_room_timestamp",
+            "room_id",
+            "timestamp",
+        ),
+
+        # Fast unread message checks
+        Index(
+            "ix_chat_receiver_read",
+            "receiver_id",
+            "is_read",
+        ),
+
+        # Fast inbox conversation queries
+        Index(
+            "ix_chat_sender_receiver",
+            "sender_id",
+            "receiver_id",
+        ),
+
+        # Fast realtime sync
+        Index(
+            "ix_chat_room_receiver",
+            "room_id",
+            "receiver_id",
+        ),
+        Index("ix_chat_listing_id", "listing_id"),
+    )
 
 
 class ChatRoom(Base):
