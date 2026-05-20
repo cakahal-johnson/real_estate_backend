@@ -35,11 +35,29 @@ class User(Base):
     photo = Column(String(255), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # =========================
+    # 🔐 ACCOUNT STATUS FLOW
+    # =========================
+    status = Column(String(30), default="pending")
+    # pending | active | rejected | suspended
+
+    is_verified = Column(Integer, default=0)
+
+    verification_notes = Column(Text, nullable=True)
+
+    verified_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    verified_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
-    listings = relationship("Listing", back_populates="owner")
+    listings = relationship(
+        "Listing",
+        back_populates="owner",
+        foreign_keys="Listing.owner_id"
+    )
     favorites = relationship("Favorite", back_populates="user", cascade="all, delete")
     orders = relationship("Order", back_populates="buyer", cascade="all, delete")
     support_tickets = relationship("SupportTicket", back_populates="user", cascade="all, delete")
+
 
 
 # =========================
@@ -67,8 +85,26 @@ class Listing(Base):
         onupdate=func.now(),
     )
 
+    # =========================
+    # 🛡️ MODERATION FLOW
+    # =========================
+    review_status = Column(String(30), default="pending")
+    # pending | approved | rejected | flagged
+
+    flag_reason = Column(Text, nullable=True)
+
+    verified_ownership = Column(Integer, default=0)
+
+    verified_by_admin = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
-    owner = relationship("User", back_populates="listings")
+    owner = relationship(
+        "User",
+        back_populates="listings",
+        foreign_keys=[owner_id]
+    )
 
     @property
     def agent(self):
@@ -76,6 +112,111 @@ class Listing(Base):
 
     favorited_by = relationship("Favorite", back_populates="listing", cascade="all, delete")
     orders = relationship("Order", back_populates="listing", cascade="all, delete")
+
+
+# =========================
+# ESCROW SYSTEM (CORE OF YOUR PLATFORM)
+# =========================
+class EscrowAccount(Base):
+    __tablename__ = "escrow_accounts"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
+
+    buyer_id = Column(Integer, ForeignKey("users.id"))
+    agent_id = Column(Integer, ForeignKey("users.id"))
+
+    amount = Column(Float, nullable=False)
+
+    status = Column(String(30), default="held")
+    # held | released | refunded | disputed
+
+    payment_reference = Column(String(100), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    released_at = Column(DateTime(timezone=True), nullable=True)
+
+    order = relationship("Order")
+
+
+# =========================
+# DISPUTE SYSTEM (CRITICAL)
+# =========================
+class Dispute(Base):
+    __tablename__ = "disputes"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    order_id = Column(Integer, ForeignKey("orders.id", ondelete="CASCADE"))
+    raised_by = Column(Integer, ForeignKey("users.id"))
+
+    reason = Column(Text, nullable=False)
+
+    status = Column(String(30), default="open")
+    # open | investigating | resolved | rejected
+
+    resolution = Column(String(50), nullable=True)
+    # refund_buyer | pay_agent | split | none
+
+    admin_notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    order = relationship("Order")
+
+
+# =========================
+# FRAUD DETECTION SYSTEM
+# =========================
+class FraudAlert(Base):
+    __tablename__ = "fraud_alerts"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    listing_id = Column(Integer, ForeignKey("listings.id"), nullable=True)
+    message_id = Column(Integer, ForeignKey("chat_messages.id"), nullable=True)
+
+    type = Column(String(50))
+    # spam | scam | suspicious | keyword_violation
+
+    severity = Column(String(20), default="low")
+    # low | medium | high
+
+    description = Column(Text)
+
+    is_resolved = Column(Integer, default=0)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+
+    resolved_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+
+
+# =========================
+# ADMIN AUDIT LOGS (VERY IMPORTANT FOR REAL SYSTEMS)
+# =========================
+class AdminAuditLog(Base):
+    __tablename__ = "admin_audit_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    admin_id = Column(Integer, ForeignKey("users.id"))
+
+    action = Column(String(100))
+    # approve_user | reject_listing | release_escrow | ban_user
+
+    target_type = Column(String(50))
+    # user | listing | order | dispute
+
+    target_id = Column(Integer)
+
+    description = Column(Text)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 # =========================
@@ -142,6 +283,12 @@ class Order(Base):
 
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # ORDER MODEL (ESCROW READY)
+    escrow_status = Column(String(30), default="not_started")
+    # not_started | held | released | refunded | disputed
+
+    dispute_flag = Column(Integer, default=0)
 
     buyer = relationship("User", back_populates="orders")
     listing = relationship("Listing", back_populates="orders")

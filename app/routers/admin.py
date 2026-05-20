@@ -1,251 +1,348 @@
 # app/routers/admin.py
-from fastapi import (
-    APIRouter,
-    Depends,
-    HTTPException,
-    status,
-    UploadFile,
-    File,
-    Form,
-)
+
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form
 from sqlalchemy.orm import Session
-from sqlalchemy import func
-from app.database import get_db
-from app import models
-from app.core.security import get_current_user, require_admin, require_role
 import os
 
-# Ensure document upload directory exists
-os.makedirs("uploads/docs", exist_ok=True)
+from app.database import get_db
+from app import models
+
+from app.core.security import get_current_user, require_admin, require_role
+
+# SERVICES
+from app.services.admin_dashboard_service import AdminDashboardService
+from app.services.audit_service import AuditService
+from app.services.moderation_service import ModerationService
+from app.services.fraud_service import FraudService
+from app.services.dispute_service import DisputeService
+from app.services.escrow_service import EscrowService
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
-# -------------------------------------------------------------------
-# 🧩 USERS MANAGEMENT
-# -------------------------------------------------------------------
-@router.get("/users", summary="List all users (Admin only)")
-def list_users(
+os.makedirs("uploads/docs", exist_ok=True)
+
+
+# =========================================================
+# 📊 ADMIN DASHBOARD (NEW CONNECTED SERVICE)
+# =========================================================
+@router.get("/dashboard")
+def admin_dashboard(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    users = db.query(models.User).all()
-    return users
+    return AdminDashboardService.get_dashboard_summary(db)
 
 
-@router.delete("/users/{user_id}", summary="Delete a user by ID")
-def delete_user(
-    user_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
-):
+# =========================================================
+# 👤 USERS MANAGEMENT
+# =========================================================
+@router.get("/users")
+def list_users(db: Session = Depends(get_db),
+               current_user: models.User = Depends(require_admin)):
+
+    return db.query(models.User).all()
+
+
+@router.delete("/users/{user_id}")
+def delete_user(user_id: int,
+                 db: Session = Depends(get_db),
+                 current_user: models.User = Depends(require_admin)):
+
     user = db.query(models.User).filter(models.User.id == user_id).first()
+
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        raise HTTPException(404, "User not found")
 
     db.delete(user)
     db.commit()
-    return {"message": f"User {user.email} deleted successfully."}
+
+    AuditService.log_action(
+        db=db,
+        admin_id=current_user.id,
+        action="delete_user",
+        target_type="user",
+        target_id=user_id,
+    )
+
+    return {"message": "User deleted"}
 
 
-# -------------------------------------------------------------------
-# 🏘 LISTINGS MANAGEMENT
-# -------------------------------------------------------------------
-@router.get("/listings", summary="List all property listings")
-def list_all_listings(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
-):
-    listings = db.query(models.Listing).all()
-    return listings
-
-
-@router.patch("/listings/{listing_id}/approve", summary="Approve a listing")
+# =========================================================
+# 🏘 LISTINGS (CONNECTED TO MODERATION SERVICE)
+# =========================================================
+@router.patch("/listings/{listing_id}/approve")
 def approve_listing(
     listing_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    listing = db.query(models.Listing).filter(models.Listing.id == listing_id).first()
-    if not listing:
-        raise HTTPException(status_code=404, detail="Listing not found")
 
-    # ✅ Ensure status field exists in Listing model
-    setattr(listing, "status", "approved")
-    db.commit()
-    db.refresh(listing)
+    listing = ModerationService.approve_listing(
+        db=db,
+        listing_id=listing_id,
+        admin_id=current_user.id,
+    )
 
-    return {"message": f"Listing {listing_id} approved successfully."}
+    AuditService.log_listing_action(
+        db=db,
+        admin_id=current_user.id,
+        listing_id=listing_id,
+        action="approve_listing",
+    )
+
+    return {"message": "Listing approved", "id": listing.id}
 
 
-@router.delete("/listings/{listing_id}", summary="Delete a listing")
-def delete_listing_admin(
+@router.patch("/listings/{listing_id}/reject")
+def reject_listing(
     listing_id: int,
+    reason: str = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    listing = db.query(models.Listing).filter(models.Listing.id == listing_id).first()
-    if not listing:
-        raise HTTPException(status_code=404, detail="Listing not found")
 
-    db.delete(listing)
-    db.commit()
-    return {"message": f"Listing {listing_id} deleted successfully."}
+    listing = ModerationService.reject_listing(
+        db=db,
+        listing_id=listing_id,
+        admin_id=current_user.id,
+        reason=reason,
+    )
 
+    AuditService.log_listing_action(
+        db=db,
+        admin_id=current_user.id,
+        listing_id=listing_id,
+        action="reject_listing",
+        reason=reason,
+    )
 
-# -------------------------------------------------------------------
-# 🧾 ORDERS MANAGEMENT
-# -------------------------------------------------------------------
-@router.get("/orders", summary="List all orders")
-def list_orders(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
-):
-    orders = db.query(models.Order).all()
-    return orders
+    return {"message": "Listing rejected", "id": listing.id}
 
 
-@router.patch("/orders/{order_id}/status", summary="Update order status")
+# =========================================================
+# 🧾 ORDERS
+# =========================================================
+@router.patch("/orders/{order_id}/status")
 def update_order_status(
     order_id: int,
-    status_update: dict,
+    status: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
+
     order = db.query(models.Order).filter(models.Order.id == order_id).first()
+
     if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+        raise HTTPException(404, "Order not found")
 
-    new_status = status_update.get("status")
-    if not new_status:
-        raise HTTPException(status_code=400, detail="Missing status value")
-
-    order.status = new_status
+    order.status = status
     db.commit()
-    db.refresh(order)
-    return {"message": f"Order {order_id} status updated to '{order.status}'."}
 
-
-@router.patch("/orders/{order_id}/confirm-payment", summary="Confirm buyer payment manually")
-def confirm_payment(
-    order_id: int,
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
-):
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
-
-    order.payment_status = "paid"
-    order.status = "approved"
-    db.commit()
-    db.refresh(order)
-
-    return {"message": f"Order #{order.id} payment confirmed by admin."}
-
-
-# -------------------------------------------------------------------
-# 💬 CHATS MANAGEMENT
-# -------------------------------------------------------------------
-@router.get("/chats", summary="List all chat messages")
-def list_chats(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
-):
-    chats = db.query(models.ChatMessage).all()
-    return chats
-
-
-# -------------------------------------------------------------------
-# 💰 REVENUE SUMMARY
-# -------------------------------------------------------------------
-@router.get("/revenue-summary", summary="Get platform revenue overview")
-def revenue_summary(
-    db: Session = Depends(get_db),
-    current_user: models.User = Depends(require_admin),
-):
-    total_orders = db.query(func.count(models.Order.id)).scalar() or 0
-    total_revenue = db.query(func.sum(models.Order.amount)).scalar() or 0.0
-    completed_orders = (
-        db.query(func.count(models.Order.id))
-        .filter(models.Order.status == "completed")
-        .scalar()
-        or 0
+    AuditService.log_action(
+        db=db,
+        admin_id=current_user.id,
+        action="update_order_status",
+        target_type="order",
+        target_id=order_id,
+        description=status,
     )
 
-    return {
-        "total_orders": total_orders,
-        "completed_orders": completed_orders,
-        "total_revenue": total_revenue,
-    }
+    return {"message": "Order updated"}
 
 
-# -------------------------------------------------------------------
-# 📄 DOCUMENT SUBMISSION & REVIEW
-# -------------------------------------------------------------------
-@router.post("/orders/{order_id}/submit-document", summary="Agent uploads property document")
-def submit_document(
-    order_id: int,
-    file: UploadFile = File(...),
+# =========================================================
+# 💰 ESCROW ACTIONS (CONNECTED SERVICE)
+# =========================================================
+@router.post("/escrow/{escrow_id}/release")
+def release_escrow(
+    escrow_id: int,
     db: Session = Depends(get_db),
-    current_user: models.User = Depends(get_current_user),
+    current_user: models.User = Depends(require_admin),
 ):
-    # ✅ Ensure only agents can submit
-    require_role(current_user, ["agent"])
 
-    order = db.query(models.Order).filter(models.Order.id == order_id).first()
-    if not order:
-        raise HTTPException(status_code=404, detail="Order not found")
+    escrow = EscrowService.release_funds(db, escrow_id)
 
-    # Save uploaded file safely
-    filename = f"{current_user.id}_{order_id}_{file.filename}"
-    save_path = os.path.join("uploads", "docs", filename)
-    with open(save_path, "wb") as f:
-        f.write(file.file.read())
-
-    submission = models.DocumentSubmission(
-        order_id=order.id,
-        agent_id=current_user.id,
-        file_url=f"/{save_path}",
+    AuditService.log_escrow_action(
+        db=db,
+        admin_id=current_user.id,
+        order_id=escrow.order_id,
+        action="release_escrow",
     )
-    db.add(submission)
+
+    return {"message": "Escrow released"}
+
+
+@router.post("/escrow/{escrow_id}/refund")
+def refund_escrow(
+    escrow_id: int,
+    reason: str = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+
+    escrow = EscrowService.refund_buyer(db, escrow_id, reason)
+
+    AuditService.log_escrow_action(
+        db=db,
+        admin_id=current_user.id,
+        order_id=escrow.order_id,
+        action="refund_escrow",
+        description=reason,
+    )
+
+    return {"message": "Refund processed"}
+
+
+# ========================================================
+# Update User Role
+# ========================================================
+@router.patch("/users/{user_id}/role")
+def update_user_role(
+    user_id: int,
+    role: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+
+    if not user:
+        raise HTTPException(404, "User not found")
+
+    # optional validation (important)
+    allowed_roles = ["admin", "agent", "buyer"]
+    if role not in allowed_roles:
+        raise HTTPException(400, "Invalid role")
+
+    user.role = role
     db.commit()
-    db.refresh(submission)
 
-    return {
-        "message": "Document submitted successfully.",
-        "data": {
-            "submission_id": submission.id,
-            "file_url": submission.file_url,
-        },
-    }
+    AuditService.log_action(
+        db=db,
+        admin_id=current_user.id,
+        action="update_user_role",
+        target_type="user",
+        target_id=user_id,
+        description=role,
+    )
+
+    return {"message": "User role updated", "id": user.id, "role": user.role}
+
+# =========================================================
+# 🚨 FRAUD (CONNECTED SERVICE)
+# =========================================================
+@router.get("/fraud/alerts")
+def get_fraud_alerts(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+
+    return FraudService.get_active_alerts(db)
 
 
-@router.patch("/documents/{doc_id}/review", summary="Admin reviews agent document")
+@router.post("/fraud/resolve/{alert_id}")
+def resolve_fraud_alert(
+    alert_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+
+    alert = FraudService.resolve_alert(
+        db=db,
+        alert_id=alert_id,
+        admin_id=current_user.id,
+    )
+
+    return {"message": "Fraud alert resolved"}
+
+
+# =========================================================
+# ⚖️ DISPUTES (CONNECTED SERVICE)
+# =========================================================
+@router.get("/disputes")
+def get_disputes(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+
+    return DisputeService.get_all_disputes(db)
+
+
+@router.post("/disputes/{dispute_id}/resolve")
+def resolve_dispute(
+    dispute_id: int,
+    resolution: str,
+    admin_notes: str = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+
+    dispute = DisputeService.resolve_dispute(
+        db=db,
+        dispute_id=dispute_id,
+        resolution=resolution,
+        admin_notes=admin_notes,
+    )
+
+    AuditService.log_dispute_action(
+        db=db,
+        admin_id=current_user.id,
+        dispute_id=dispute_id,
+        action="resolve_dispute",
+        notes=admin_notes,
+    )
+
+    return {"message": "Dispute resolved"}
+
+
+# =========================================================
+# 💬 CHATS
+# =========================================================
+@router.get("/chats")
+def list_chats(db: Session = Depends(get_db),
+               current_user: models.User = Depends(require_admin)):
+
+    return db.query(models.ChatMessage).all()
+
+
+# =========================================================
+# 📄 DOCUMENT REVIEW (IMPROVED)
+# =========================================================
+@router.patch("/documents/{doc_id}/review")
 def review_document(
     doc_id: int,
-    status: str = Form(...),  # expected values: 'approved' | 'rejected'
+    status: str = Form(...),
     remarks: str = Form(""),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    doc = db.query(models.DocumentSubmission).filter(models.DocumentSubmission.id == doc_id).first()
+
+    doc = db.query(models.DocumentSubmission).filter(
+        models.DocumentSubmission.id == doc_id
+    ).first()
+
     if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+        raise HTTPException(404, "Document not found")
 
     doc.status = status
     doc.remarks = remarks
-    db.commit()
-    db.refresh(doc)
 
-    # ✅ If approved, mark order as completed
+    db.commit()
+
+    # auto complete order
     if status == "approved":
         order = db.query(models.Order).filter(models.Order.id == doc.order_id).first()
         if order:
             order.status = "completed"
             db.commit()
 
-    return {
-        "message": f"Document {status}.",
-        "remarks": remarks,
-        "document_id": doc.id,
-    }
+    AuditService.log_action(
+        db=db,
+        admin_id=current_user.id,
+        action="review_document",
+        target_type="document",
+        target_id=doc_id,
+        description=status,
+    )
+
+    return {"message": "Document reviewed"}

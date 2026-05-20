@@ -565,3 +565,70 @@ D) ✅ Order Status Badge styles (warning, approved, completed)
 E) ✅ Add timestamps with “x days ago”
 
 python seed_data.py    
+
+ADMIN SECTION
+SYSTEM-WIDE ENUM GUIDE (IMPORTANT)
+
+To keep backend consistent:
+
+USER STATUS:
+- pending
+- active
+- rejected
+- suspended
+
+LISTING STATUS:
+- pending
+- approved
+- rejected
+- flagged
+
+ESCROW STATUS:
+- held
+- released
+- refunded
+- disputed
+
+DISPUTE STATUS:
+- open
+- investigating
+- resolved
+- rejected
+
+FRAUD SEVERITY:
+- low
+- medium
+- high
+
+____________________________________________________________
+🚀 10. NEXT STEP (HIGH VALUE)
+
+Now your system is READY for service layer.
+
+We will build:
+
+🧩 app/services/
+1. escrow_service.py
+hold funds
+release funds
+refund logic
+2. fraud_service.py
+keyword detection
+risk scoring
+auto-flagging
+3. moderation_service.py
+listing approval rules
+user verification logic
+4. dispute_service.py
+resolution engine
+decision flow
+5. audit_service.py
+logs every admin action
+
+__________________________________________________________
+app/services/
+ ├── escrow_service.py
+ ├── fraud_service.py
+ ├── moderation_service.py
+ ├── dispute_service.py
+ ├── audit_service.py

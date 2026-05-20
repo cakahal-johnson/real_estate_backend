@@ -273,3 +273,196 @@ class SupportTicketResponse(BaseModel):
 class PaystackVerifyRequest(BaseModel):
     reference: str
     order_id: int
+
+
+# USER VERIFICATION SCHEMAS for ADMIN SECTIONS
+class UserStatusUpdate(BaseModel):
+    status: str
+    # pending | active | rejected | suspended
+    notes: Optional[str] = None
+
+
+class UserVerificationResponse(BaseModel):
+    id: int
+    status: str
+    is_verified: int
+    verified_at: Optional[datetime] = None
+    verification_notes: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# LISTING MODERATION SCHEMAS
+class ListingModerationUpdate(BaseModel):
+    review_status: str
+    # pending | approved | rejected | flagged
+
+    flag_reason: Optional[str] = None
+    verified_ownership: Optional[int] = None
+
+
+class ListingModerationResponse(BaseModel):
+    id: int
+    review_status: str
+    flag_reason: Optional[str]
+    verified_ownership: int
+    approved_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ESCROW SYSTEM SCHEMAS
+class EscrowResponse(BaseModel):
+    id: int
+    order_id: int
+    buyer_id: int
+    agent_id: int
+    amount: float
+    status: str
+    payment_reference: Optional[str]
+    created_at: datetime
+    released_at: Optional[datetime]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EscrowActionRequest(BaseModel):
+    action: str
+    # hold | release | refund | dispute
+
+    reason: Optional[str] = None
+
+
+# DISPUTE SYSTEM SCHEMAS
+class DisputeCreate(BaseModel):
+    order_id: int
+    reason: str
+
+
+class DisputeResponse(BaseModel):
+    id: int
+    order_id: int
+    raised_by: int
+    reason: str
+    status: str
+    resolution: Optional[str]
+    created_at: datetime
+    resolved_at: Optional[datetime]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DisputeResolveRequest(BaseModel):
+    resolution: str
+    # refund_buyer | pay_agent | split | reject_claim
+
+    admin_notes: Optional[str] = None
+
+
+# FRAUD DETECTION SCHEMAS
+class FraudAlertResponse(BaseModel):
+    id: int
+    user_id: Optional[int]
+    listing_id: Optional[int]
+    message_id: Optional[int]
+    type: str
+    severity: str
+    description: str
+    is_resolved: int
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FraudActionRequest(BaseModel):
+    action: str
+    # warn | suspend | ban | clear
+
+    notes: Optional[str] = None
+
+
+# ADMIN AUDIT LOG SCHEMAS
+class AdminAuditLogResponse(BaseModel):
+    id: int
+    admin_id: int
+    action: str
+    target_type: str
+    target_id: int
+    description: Optional[str]
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminActionRequest(BaseModel):
+    action: str
+    target_type: str
+    target_id: int
+    description: Optional[str] = None
+
+
+# ENHANCED CHAT SCHEMA (for admin monitoring)
+class ChatAdminView(BaseModel):
+    id: int
+    room_id: str
+    sender_id: int
+    receiver_id: int
+    message: str
+    timestamp: datetime
+    is_read: int
+    delivered: int
+    seen: int
+    listing_id: Optional[int]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EscrowActionResponse(BaseModel):
+    escrow_id: int
+    status: str
+    message: str
+    released_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DisputeActionResponse(BaseModel):
+    dispute_id: int
+    status: str
+    resolution: Optional[str]
+    message: str
+    resolved_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FraudScoreResponse(BaseModel):
+    user_id: Optional[int]
+    score: int
+    level: str
+    # low | medium | high | critical
+
+    reasons: List[str]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AdminDashboardResponse(BaseModel):
+    total_users: int
+    active_users: int
+
+    total_listings: int
+    pending_listings: int
+    flagged_listings: int
+
+    total_orders: int
+    completed_orders: int
+    disputed_orders: int
+
+    total_revenue: float
+
+    fraud_alerts: int
+
+    open_tickets: int
+
+    model_config = ConfigDict(from_attributes=True)
